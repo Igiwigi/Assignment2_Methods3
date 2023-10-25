@@ -1,0 +1,628 @@
+---
+title: "Assignment 2 (A2): Language development in autistic and neurotypical children"
+subtitle: 'Instructions'
+author: Maxime Sainte-Marie
+output:
+  html_document:
+      toc: yes
+      number_sections: yes
+      toc_float: yes
+      theme: united
+      highlight: espresso
+      css: '../../varia/standard.css'
+  pdf_document:
+    toc: no
+    number_sections: yes
+geometry: margin=1in
+knit: (function(inputFile, encoding) {
+  browseURL(
+    rmarkdown::render(
+      inputFile,
+      encoding = encoding,
+      output_dir = 'documents/assignments/instructions',
+      output_file = "a2_language_development"))})
+bibliography: '../../varia/bibliography.bib'
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file()) 
+
+if(!'cmdstanr' %in% installed.packages()){
+  remotes::install_github("stan-dev/cmdstanr")
+  cmdstanr::install_cmdstan()}
+
+pacman::p_load(
+  tidyverse,
+  brms,
+  patchwork,
+  ggplot2
+)
+
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+getwd()
+
+data <- read.csv("data/data_clean.csv")
+```
+
+# Intro
+
+Autism Spectrum Disorder is often related to language impairment. However, this phenomenon has rarely been empirically traced in detail:
+
+1. relying on actual naturalistic language production
+2. over extended periods of time.
+
+Around 30 kids with ASD and 30 typically developing kids were videotaped (matched by linguistic performance at visit 1) for ca. 30 minutes of naturalistic interactions with a parent. Data collection was repeated 6 times per kid, with 4 months between each visit. Following transcription of the data, the following quantities were computed:
+
+1. the amount of words that each kid uses in each video. Same for the parent
+2. the amount of unique words that each kid uses in each video. Same for the parent
+3. .the amount of morphemes per utterance (Mean Length of Utterance) displayed by each child in each video. Same for the parent. 
+
+This data is in the file you prepared in the previous class, but you can also find it [here](https://www.dropbox.com/s/d6eerv6cl6eksf3/data_clean.csv?dl=0)
+
+
+## Assignment structure
+
+We will be spending a few weeks with this assignment. In particular, we will:
+
+1. build our model, analyze our empirical data, and interpret the inferential results
+2. use your model to predict the linguistic trajectory of new children and assess the performance of the model based on that.
+
+As you work through these parts, you will have to produce a written document (separated from the code) answering the following questions:
+
+1. Briefly describe the empirical data, your model(s) and their quality. Report the findings: how does development differ between autistic and neurotypical children (N.B. remember to report both population and individual level findings)? which additional factors should be included in the model? Add at least one plot showcasing your findings.
+
+2. Given the model(s) from Q2, how well do they predict the data? Discuss both in terms of absolute error in training vs testing; and in terms of characterizing the new kids' language development as typical or in need of support.
+
+Below you can find more detailed instructions for each part of the assignment.
+
+# Analysis
+
+- Describe your sample (n, age, gender, clinical and cognitive features of the two groups) using plots and critically assess whether the groups (ASD and TD) are balanced.
+
+- Describe linguistic development (in terms of MLU over time) in TD and ASD children (as a function of group). Discuss the difference (if any) between the two groups
+
+- Describe individual differences in linguistic development: do all kids follow the same path? Are all kids reflected by the general trend for their group?
+
+- Include additional predictors in your model of language development (N.B. not other indexes of child language: types and tokens, that'd be cheating). Identify the best model, by conceptual reasoning, model comparison or a mix. Report the model you choose (and name its competitors, if any) and discuss why it's the best model.
+
+In working through this part of the assignment, keep in mind the following workflow:
+
+1. Formula definition
+2. Prior definition
+3. Prior predictive checking
+4. Model fitting
+5. Model quality checks
+7. Model comparison
+
+## Describe Data
+#Describe your sample (n, age, gender, clinical and cognitive features of the two groups) (using plots)
+#critically assess whether the groups (ASD and TD) are balanced
+```{r describe_data}
+first_visit <- data %>%
+  filter(Visit == 1) 
+
+unique_id_count <- data %>%
+  summarize(unique_count = n_distinct(Child.ID))
+cat("Number of unique IDs:", unique_id_count$unique_count, "\n")
+
+last_visit <- data %>%
+  filter(Visit == 6) 
+
+```
+
+```{r describe_data (distribution)}
+data %>%
+  group_by(Diagnosis) %>%
+  summarize(Diagnosis = n())
+
+ggplot(data, aes(x = Diagnosis, fill = Diagnosis)) +
+  geom_bar() +
+  labs(title = "Spread of Conditions", x = "Condition", y = "Count")
+
+ggplot(first_visit, aes(x = Age, fill = Diagnosis)) +
+  geom_histogram(binwidth = 5, color = "black") +
+  labs(title = "Distribution of Age", x = "Age on visit 1", y = "Frequency") +
+  guides(fill=guide_legend(title="Diagnosis"))
+
+ggplot(first_visit, aes(x = Gender, fill = Diagnosis)) +
+  geom_bar() +
+  labs(title = "Distribution of Diagnoses by Gender", x = "Gender", y = "Count")
+
+ggplot(first_visit, aes(x = Child.ID, fill = Diagnosis)) +
+  geom_bar() +
+  labs(title = "Distribution of Diagnoses by Ethnicity", x = "Ethnicity", y = "Count")+
+  facet_wrap(~Ethnicity)
+#very few ethnicities represented outside of White
+
+first_visit %>%
+  group_by(Diagnosis, Child.ID, Ethnicity) %>%
+  summarize(unique_ethnicity_count = n_distinct(Ethnicity))
+
+first_visit %>%
+  group_by(Ethnicity)%>%
+  count(Ethnicity)
+#57 out of 66 are white, 3 more are half-white
+
+first_visit %>%
+  group_by(Gender, Diagnosis) %>%
+  summarize(Count = n()) %>%
+  pivot_wider(names_from = Gender, values_from = Count) %>%
+  mutate(Ratio_Women = F / sum(F), Ratio_Men = M / sum(M))
+#The gender ratios within ASD and TD are balanced, though the amount of females is still less by an incredible margin (this ratio balance is roughly the case W(46% ASD 55% TD) M(47% ASD, 53% TD))
+```
+
+```{r describe_data (clinical & cognitive features)}
+ggplot(data, aes(x = MullenRaw, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  # Add density plot with transparency
+  labs(title = "Non-verbal IQ", x = "MullenRaw", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+#Non-verbal IQ is not as weak for the autistic individuals as their verbal iq, but still lower. Some non-diagnosed individuals however seem to be "part of the same distribution" visually as the ones diagnosed with ASD, same the other way around, though to a lesser extent.
+#is it not such a distinguishing aspect of autism?
+
+ggplot(data, aes(x = ADOS, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  # Add density plot with transparency
+  labs(title = "Severity of Autistic Symptoms", x = "ADOS", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+#naturally, the ones diagnosed with autism are the ones with severity of autistic symptoms, checks out
+
+ggplot(data, aes(x = ExpressiveLangRaw, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  # Add density plot with transparency
+  labs(title = "Distributions of Verbal IQ", x = "ExpressiveLangRaw", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+#worse for the autistic ones, some TD individuals however also seem to be "part of the same distribution" visually as the diagnosed individuals
+#not a very distinguishing aspect of autism?
+
+ggplot(data, aes(x = Socialization, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  # Add density plot with transparency
+  labs(title = "Distributions of Social interaction skills, responsiveness", x = "Socialization", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+#worse for those with ASD overall, though some diagnosed are more "higher functioning" than others?
+
+ggplot(data, aes(x = CHI_MLU, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
+  labs(title = "Density Plot of Mean Length of Utterance (child)", x = "MLU", y = "Density") +
+  guides(fill = guide_legend(title = "Diagnosis"))
+#ASD children have shorter mean length utterances
+
+ggplot(data, aes(x = types_CHI, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
+  labs(title = "Types of unique words for children", x = "types", y = "Density") +
+  guides(fill = guide_legend(title = "Diagnosis"))
+#much less unique words for ASD
+
+ggplot(data, aes(x = tokens_CHI, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
+  labs(title = "Total words for children", x = "tokens", y = "Density") +
+  guides(fill = guide_legend(title = "Diagnosis"))
+#less words for ASD children overall
+```
+
+```{r describe_data (1st visit)}
+ggplot(data, aes(x = ADOS1, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) + 
+  labs(title = "Severity of Autistic Symptoms on visit 1", x = "ADOS", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+
+ggplot(data, aes(x = verbalIQ1, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
+  labs(title = "Verbal IQ on visit 1", x = "Verbal IQ", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+#overall worse for ASD, but certain ASD are "high-functioning" and certain TD are "lower-functioning" in this regard (individual differences)
+
+ggplot(data, aes(x = nonVerbalIQ1, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
+  labs(title = "Non-verbal IQ on visit 1", x = "non-verbal IQ", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+#not so different between the diagnoses
+
+ggplot(data, aes(x = Socialization1, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
+  labs(title = "Social interaction skills and responsiveness on visit 1", x = "Socialization", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+#Lower overall for ASD, but there are some more "higher-functioning" ASD individuals and some lower functioning TD (individual differences)
+#distinguishing
+```
+
+```{r describe_data (MLU over visits)}
+ggplot(data, aes(x = Visit, y = CHI_MLU, color = Diagnosis)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, aes(group = Diagnosis)) +
+  labs(title = "Development of MLU Over Time", x = "Visit", y = "Mean Length of Utterance (MLU)") +
+  theme_minimal()
+#roughly speaking, ASD & TD children begin with the same mean MLU, but TD children progress faster overall (higher slope). That said, there are differences between individual children, especially those diagnosed, as some are "high functioning" and match TD MLU values, and others are noticeably below: as in, "low-functioning". In the 1st visit, some ASD children even have a noticeably higher MLU than most, if not all, TD children.
+
+#comparing distributions for 1st and last visit CHI_MLU
+first_visit$Visit_Type <- "First Visit"; last_visit$Visit_Type <- "Last Visit"
+first_last_combo <- rbind(first_visit, last_visit)
+
+ggplot(first_last_combo, aes(x = CHI_MLU, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
+  labs(title = "Density Plot of Mean Length of Utterance (child)", x = "MLU", y = "Density") +
+  guides(fill = guide_legend(title = "Diagnosis")) +
+  facet_wrap(~Visit_Type)
+
+first_last_combo %>%
+  group_by(Diagnosis, Visit_Type) %>%
+  summarize(mean_MLU = mean(CHI_MLU, na.rm = TRUE), max_MLU = max(CHI_MLU, na.rm = TRUE), min_MLU = min(CHI_MLU, na.rm = TRUE))
+#the mean MLU for ASD & TD children was the same overall on 1st visit, but TD children improved on this faster, resulting in a higher mean for visit 6.
+#the Max MLU for ASD children is 3.4 for the first visit, as opposed to 1.94 for the TD children (autistic utterance genius?) Though this advantage peters off.
+#There appear to be some near-mute ASD children, as well (min value 0 and 0.0156 for 1st and 6th visit respectively) Comparatively, by visit 6, TD children have a min MLU of 2.07 (this is higher than the ASD mean of 1.89 by this point)
+
+```
+
+```{r describe_data (Verbal IQ Development per child ID)}
+#ExpressiveLangRaw per child ID (to illustrate the difference in trajectories of learning)
+ggplot(data, aes(x = Visit, y = ExpressiveLangRaw, color = Diagnosis)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, aes(group = Child.ID)) +
+  labs(title = "Verbal IQ Over Time, for each child", x = "Visit", y = "ExpressiveLangRaw") +
+  theme_minimal()
+
+ggplot(data, aes(x = Visit, y = ExpressiveLangRaw, color = Diagnosis)) +
+  geom_point() +
+  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, aes(group = Diagnosis)) +
+  labs(title = "Verbal IQ Over Time, for each child", x = "Visit", y = "ExpressiveLangRaw") +
+  theme_minimal()
+#loses out on a lot of the individual differences between slopes
+
+#there are children with downwards going slopes (value higher on 1st than 6th visit)
+data %>%
+  filter(Visit %in% c(1, 6)) %>%  # Filter for only visits 1 and 6
+  group_by(Child.ID, Visit, Diagnosis) %>%
+  summarize(min_ELR = min(ExpressiveLangRaw)) %>%
+  pivot_wider(names_from = Visit, values_from = min_ELR) %>%
+  filter(`1` > `6`)
+#2 children whose visit 6 ExpressiveLangRaw is lower than their visit 1, both ASD, slope is negative because it appears they did not significantly progress (similar values) -> slope being negative is not particularly meaningful.
+
+data %>%
+  filter(Visit %in% c(1, 6)) %>%  # Filter for only visits 1 and 6
+  group_by(Child.ID, Visit, Diagnosis) %>%
+  summarize(min_MLU = min(CHI_MLU)) %>%
+  pivot_wider(names_from = Visit, values_from = min_MLU) %>%
+  filter(`1` > `6`)
+# there are 6 children whose visit 6 MLU is lower than their visit 1, all ASD, slope is negative because it appears they did not significantly progress (similar values), as such, the fact that the slope is negative is, for most of them, not the significant part. Probably more ASD children whose MLU remained the same but whose slope is slightly positive. Still, there are two children for whom the values appeared to go down ""significantly"" (ID 23, 1 -> 0.5 & ID 36, 1.25 - 0.754)
+```
+
+## Formula Definition
+
+```{r define_formulas}
+#Based on my earlier (mostly visual) findings, I believe the following:
+#MullenRaw (non-verbal IQ) is not particularly distinguishing for the conditions and therefore can be omitted
+#ADOS definitely distinguishes the conditions and ties into CHI_MLU as a result
+#ExpressiveLangRaw (verbal IQ) is more distinguishing than MullenRaw and should be used in the model.
+#Socialization definitely distinguishes the conditions (differing heavily between conditions)
+
+formula1 <-
+  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit|Child.ID))
+
+formula2 <-
+  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS||Child.ID))
+
+formula3 <- brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS + Socialization + (1|Child.ID)))
+
+formula4 <-
+  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS + Socialization + ExpressiveLangRaw ||Child.ID))
+#visit effect and the effect of ADOS, socialization, verbal iq differ per child, is this valid?
+#are these overcomplicated?
+
+```
+
+## Prior Definition
+
+```{r define_priors}
+#auto_prior did not work, why? will try setting them all by hand, hopefully at least mildly correctly done?
+# As auto_prior() also sets priors on the intercept, the model formula used in brms::brm() must be rewritten to something like y ~ 0 + intercept ..., see set_prior. --is it this?
+
+get_prior(formula1, data = data)
+get_prior(formula2, data = data)
+get_prior(formula3, data = data)
+get_prior(formula4, data = data)
+
+priors1 <- c(
+  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisTD"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"),
+  prior(lkj(1), class = "cor"),
+  prior(student_t(3, 1.9, 2.5), class = "Intercept"),
+  prior(student_t(3, 0, 2.5), class = "sd"),
+  prior(student_t(3, 0, 2.5), class = "sd", coef = "Intercept", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sd", coef = "Visit", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sigma")
+)
+
+priors2 <- c(
+  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisTD"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"),
+  prior(student_t(3, 0, 2.5), class = "sd"),
+  prior(student_t(3, 0, 2.5), class = "sd", coef = "ADOS", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sigma")
+)
+
+priors3 <- c(
+  prior(student_t(3, 0, 2.5), class = "b", coef = "ADOS"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisTD"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Socialization"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"),
+  prior(student_t(3, 0, 2.5), class = "sd", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sigma")
+)
+
+priors4 <- c(
+  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisTD"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"),
+  prior(student_t(3, 0, 2.5), class = "sd"),
+  prior(student_t(3, 0, 2.5), class = "sd", coef = "ADOS", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sd", coef = "ExpressiveLangRaw", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sd", coef = "Intercept", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sd", coef = "Socialization", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sd", coef = "Visit", group = "Child.ID"),
+  prior(student_t(3, 0, 2.5), class = "sigma")
+)
+```
+
+## Prior Predictive Checking
+
+By setting *sample_prior* parameter is set to "only" in the **brm** function, draws are drawn solely from the priors, thus ignoring the likelihood. This allows among other things to generate draws from the prior predictive distribution.
+
+```{r }
+model1_prior <- brm(
+  formula1,
+  data,
+  family = gaussian,
+  prior = priors1,
+  sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
+  file = 'data/model1_prior',
+  backend = "cmdstanr",
+  chains = 2,
+  stan_model_args = list(stanc_options = list("O1"))
+)
+prior_predictive1 <- pp_check(model1_prior, ndraws = 100)
+
+model2_prior <- brm(
+  formula2, 
+  data,
+  family = gaussian,
+  prior = priors2,
+  sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
+  file = 'data/model2_prior',
+  backend = "cmdstanr",
+  chains = 2,
+  stan_model_args = list(stanc_options = list("O1"))
+)
+prior_predictive2 <- pp_check(model2_prior, ndraws = 100)
+
+
+model3_prior <- brm(
+  formula3, 
+  data,
+  family = gaussian,
+  prior = priors3,
+  sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
+  file = 'data/model3_prior',
+  backend = "cmdstanr",
+  chains = 2,
+  stan_model_args = list(stanc_options = list("O1"))
+)
+prior_predictive3 <- pp_check(model3_prior, ndraws = 100)
+
+
+model4_prior <- brm(
+  formula4, #is this stinkying it up?
+  data,
+  family = gaussian,
+  prior = priors4,
+  sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
+  file = 'data/model4_prior',
+  backend = "cmdstanr",
+  chains = 2,
+  stan_model_args = list(stanc_options = list("O1"))
+)
+prior_predictive4 <- pp_check(model4_prior, ndraws = 100)
+
+prior_predictive1 + prior_predictive2 
+prior_predictive3 + prior_predictive4
+#are these too narrow or good? should they not look a bit differently distributed?
+
+```
+
+## Model Fitting
+
+```{r fit_model}
+prior1model <- readRDS('data/model1_prior.rds')
+prior2model <- readRDS('data/model2_prior.rds')
+prior3model <- readRDS('data/model3_prior.rds')
+prior4model <- readRDS('data/model4_prior.rds')
+
+model1 <- brm(
+  formula1,
+  data,
+  family = gaussian,
+  prior = prior1model$prior,
+  sample_prior = T,
+  file = 'data/model1_fit',
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2,
+  threads = threading(2),
+  control = list(
+    adapt_delta = 0.9,
+    max_treedepth = 20
+  ),
+  stan_model_args = list(stanc_options = list("O1"))
+)
+
+model2 <- brm(
+  formula2,
+  data,
+  family = gaussian,
+  prior = prior2model$prior,
+  sample_prior = T,
+  file = 'data/model2_fit',
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2,
+  threads = threading(2),
+  control = list(
+    adapt_delta = 0.9,
+    max_treedepth = 20
+  ),
+  stan_model_args = list(stanc_options = list("O1"))
+)
+
+model3 <- brm(
+  formula3,
+  data,
+  family = gaussian,
+  prior = prior3model$prior,
+  sample_prior = T,
+  file = 'data/model3_fit',
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2,
+  threads = threading(2),
+  control = list(
+    adapt_delta = 0.9,
+    max_treedepth = 20
+  ),
+  stan_model_args = list(stanc_options = list("O1"))
+)
+
+model4 <- brm(
+  formula4,
+  data,
+  family = gaussian,
+  prior = prior4model$prior,
+  sample_prior = T,
+  file = 'data/model4_fit',
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2,
+  threads = threading(2),
+  control = list(
+    adapt_delta = 0.9,
+    max_treedepth = 20
+  ),
+  stan_model_args = list(stanc_options = list("O1"))
+)
+
+```
+
+## Model quality checks
+
+```{r check_models}
+plot(model1)
+plot(model2)
+plot(model3)
+plot(model4)
+
+```
+
+## Model Comparison
+
+```{r compare_models}
+m1 <- add_criterion(model1, criterion = "loo")
+m2 <- add_criterion(model2, criterion = "loo")
+m3 <- add_criterion(model3, criterion = "loo")
+m4 <- add_criterion(model4, criterion = "loo") 
+#moment_match = TRUE recommended by error message yet gives another error message Error in compileCode, Error in sink(type = "output") : invalid connection
+  
+
+
+m1
+
+m2
+#Warning message:
+# There were 4 divergent transitions after warmup. Increasing adapt_delta above 0.9 may help. See http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup 
+
+m3
+
+m4
+#Warning messages:
+# 1: Parts of the model have not converged (some Rhats are > 1.05). Be careful when analysing the results! We recommend running more iterations and/or setting stronger priors. 
+# 2: There were 212 divergent transitions after warmup. Increasing adapt_delta above 0.9 may help. See http://mc-stan.org/misc/warnings.html#divergent-transitions-after-warmup 
+
+m1R2 <- add_criterion(model1, criterion = "loo_R2")
+m2R2 <- add_criterion(model2, criterion = "loo_R2")
+m3R2 <- add_criterion(model3, criterion = "loo_R2")
+m4R2 <- add_criterion(model4, criterion = "loo_R2")
+
+m1R2
+m2R2 #still 4 divergent transitions after warmup
+m3R2
+m4R2#still parts of the model haven't converged
+
+loo_compare( m1, m2, m3, m4)
+loo_model_weights( m1, m2, m3, m4)
+
+nobs(model1) #352
+nobs(model2) #117
+nobs(model3) #117
+nobs(model4) #61
+
+#these are the two models with the same amount of parameters, did the others drop too many values?
+loo_compare(m2, m3)
+loo_model_weights( m2, m3)
+#m2 favored over m3, m2 has 1.000 weight over m3
+```
+
+```{r test_hypotheses}
+
+
+```
+
+
+# Prediction
+
+N.B. There are several data sets for this exercise, so pay attention to which one you are using!
+
+1. The (training) data set from last time
+2. The (test) data set on which you can test the models from last time:
+  - [Demographic and clinical data](https://www.dropbox.com/s/ra99bdvm6fzay3g/demo_test.csv?dl=1)
+  - [Utterance Length data](https://www.dropbox.com/s/uxtqqzl18nwxowq/LU_test.csv?dl=1)
+  - [Word data](https://www.dropbox.com/s/1ces4hv8kh0stov/token_test.csv?dl=1)
+
+Relying on the model(s) you trained in part 2 of the exercise, create predictions for the test set and assess how well they do compared to the actual data.
+
+- Discuss the differences in performance of your model in training and testing data. Is the model any good?
+- Let's assume you are a speech therapy clinic. You want to assess whether the kids in your test sample will have a typical (like a TD) development, or they will have a worse one, in which case they should get speech therapy support. What do your predictions tell you about that? Which kids would you provide therapy for? Is the model any good?
+
+```{r import_data}
+# Write your code here
+
+
+```
+
+Remove missing data to ease merging with predictions
+
+```{r remove_missing}
+# Write your code here
+
+
+```
+
+Here we should be using a model that'd have some more interesting predictors (to make sure we have something to predict)
+
+Alternatively we could retrain the model to include visit 1 for all the test kids (and thus have the random effects)
+
+```{r train_model}
+# Write your code here
+
+
+```
+
+Assess the performance of the model on the training data: root mean square error is a good measure. (Tip: google the function rmse())
+
+```{r assess_performance}
+# Write your code here
+
+
+```
+
+
+Show how child fare in Child MLU compared to the average TD child at each visit
+```{r child_performance_td_average}
+# Write your code here
+
+```
