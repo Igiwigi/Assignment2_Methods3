@@ -594,7 +594,8 @@ The standard deviation values grouped by Child.ID tell how the CHI_MLU values va
 The Family Specific Parameter sigma provides information about the sd of the response variable CHI_MLU, the estimate of which is 0.41 (how spread out the variable is around the mean). the 95% range for this standard deviance is 0.37 to 0.44.
 
 ```{r test_hypotheses}
-
+model <- readRDS("data/model4_fit.rds")
+#how to test hypotheses?
 ```
 
 "2. use your model to predict the linguistic trajectory of new children and assess the performance of the model based on that."
@@ -615,17 +616,50 @@ Relying on the model(s) you trained in part 2 of the exercise, create prediction
 - Let's assume you are a speech therapy clinic. You want to assess whether the kids in your test sample will have a typical (like a TD) development, or they will have a worse one, in which case they should get speech therapy support. What do your predictions tell you about that? Which kids would you provide therapy for? Is the model any good?
 
 ```{r import_data}
-# Write your code here
-
-
+demo <- read_csv("data/test-data/demo_test.csv")
+uld <- read_csv("data/test-data/LU_test.csv")
+token <- read_csv("data/test-data/token_test.csv")
 ```
 
 Remove missing data to ease merging with predictions
-
 ```{r remove_missing}
-# Write your code here
+#are there any NA values when visit 1?
+demo %>%
+  filter(Visit == 1) %>%
+  select(-VinelandReceptive, -VinelandExpressive, -VinelandWritten)%>%
+  summarise(Any_NA = any(is.na(.)))
+#there arent if vineland is omitted, wtf is it even?
 
+demo <- demo %>% 
+  group_by(Child.ID) %>%  
+  mutate(ADOS = if_else(is.na(ADOS) & Visit != 1, first(ADOS), ADOS))%>% #kind of unnecessary since I only care about 1st value due to the model specification
+  mutate(ADOS1 = first(ADOS))%>%
+  mutate(Socialization1 = first(Socialization))%>%
+  mutate(VerbalIQ1 = first(ExpressiveLangRaw))%>%
+  mutate(Diagnosis = if_else(Diagnosis == "A", "ASD", "TD"))%>%
+  group_by(Child.ID) %>% #can do this since the order of the children is the same in each dataframe
+  mutate(Child.ID = cur_group_id())
 
+uld <- uld %>%
+  rename(Visit = VISIT) %>%
+  mutate(Visit = as.integer(gsub("[^0-9]", "", Visit))) %>%
+  rename(Child.ID = SUBJ) %>%
+  group_by(Child.ID) %>%
+  mutate(Child.ID = cur_group_id())
+
+token <- token %>%
+  rename(Child.ID = SUBJ) %>%
+  group_by(Child.ID) %>% #can do this since the order of the children is the same in each dataframe
+  mutate(Child.ID = cur_group_id())%>%
+  rename(Visit = VISIT) %>%
+  mutate(Visit = as.integer(gsub("[^0-9]", "", Visit)))%>%
+  select(-X)
+
+test_data <- inner_join(demo,uld)
+test_data <- inner_join(test_data, token)
+
+test_data <- test_data %>%
+  select(Child.ID, Visit, Diagnosis, Socialization1, ADOS1, CHI_MLU, VerbalIQ1 )
 ```
 
 Here we should be using a model that'd have some more interesting predictors (to make sure we have something to predict)
