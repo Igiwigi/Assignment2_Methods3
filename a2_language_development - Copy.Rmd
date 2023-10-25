@@ -1,7 +1,7 @@
 ---
 title: "Assignment 2 (A2): Language development in autistic and neurotypical children"
 subtitle: 'Instructions'
-author: Maxime Sainte-Marie
+author: Ingrid Backman
 output:
   html_document:
       toc: yes
@@ -25,6 +25,12 @@ bibliography: '../../varia/bibliography.bib'
 editor_options: 
   chunk_output_type: console
 ---
+
+### TO-DO: 
+- actually answer the questions and knit this up nicely (clean up)
+- maybe lessen the amount of plots and pick the most informational ones to include
+- do the rest of the exercise (prediction)
+- check if priors etc. are properly done
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -577,12 +583,21 @@ loo_model_weights( m1, m2, m3, m4)
 
 #m4 favored over all models, weight 1.000 and 0.0, 0.0 is better than the minuses
 ```
-# ESS values nicely high in m4 (high convergence or something?)
+# ESS values nicely high in m4, at least in population level (high convergence or something?)
 # best model is m4
+In the best model m4, CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 || Child.ID), the intercept estimated to be 1.12, falls between 0.89 to 1.35 95% of the time, meaning that the true population intercept for CHI_MLU lies between this value range 95% of the time. Since the estimate falls within this range, it's reasonable to conclude it is statistically plausible.
+
+DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes zero). Compared to TD, this means that those with DiagnosisASD have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero. Not statistically significant?
+
+The standard deviation values grouped by Child.ID tell how the CHI_MLU values vary by Child.ID, for example the Intercept varies with 95% certainty between 0.00 and 0.30. Some of the sd values have fairly low ESS, meaning that they are not as reliable and may not have generated enough diverse samples. Either that, or its a convergence or model specification issue.
+
+The Family Specific Parameter sigma provides information about the sd of the response variable CHI_MLU, the estimate of which is 0.41 (how spread out the variable is around the mean). the 95% range for this standard deviance is 0.37 to 0.44.
 
 ```{r test_hypotheses}
+
 ```
 
+"2. use your model to predict the linguistic trajectory of new children and assess the performance of the model based on that."
 
 # Prediction
 
