@@ -321,7 +321,8 @@ formula3 <- brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Soci
 formula4 <-
   brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 ||Child.ID))
 #visit effect and the effect of ADOS, socialization, verbal iq differ per child, is this valid?
-#are these overcomplicated?
+#are these overcomplicated, overfit?
+#using 1st visit variables because there are no NAs (can compare with loo because same amount of data points); is this valid?
 
 ```
 
@@ -337,7 +338,7 @@ get_prior(formula3, data = data)
 get_prior(formula4, data = data)
 
 priors1 <- c(
-  prior(normal(0,2), class = "b", coef = "DiagnosisASD"),
+  prior(normal(0,2), class = "b", coef = "DiagnosisASD"), #is this too strong a predictor?
   prior(lkj(1), class = "cor"),
   prior(student_t(3, 1.9, 2.5), class = "Intercept"),
   prior(student_t(3, 0, 2.5), class = "sd"),
@@ -347,25 +348,25 @@ priors1 <- c(
 )
 
 priors2 <- c(
-  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"),
-  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"), #is this too strong a predictor?
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"), #is this too strong a predictor?
   prior(student_t(3, 0, 2.5), class = "sd"),
   prior(student_t(3, 0, 2.5), class = "sd", coef = "ADOS1", group = "Child.ID"),
   prior(student_t(3, 0, 2.5), class = "sigma")
 )
 
 priors3 <- c(
-  prior(student_t(3, 0, 2.5), class = "b", coef = "ADOS1"),
-  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"),
-  prior(student_t(3, 0, 2.5), class = "b", coef = "Socialization1"),
-  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "ADOS1"), #is this too strong a predictor?
+  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"), #is this too strong a predictor?
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Socialization1"), #is this too strong a predictor?
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"), #is this too strong a predictor?
   prior(student_t(3, 0, 2.5), class = "sd", group = "Child.ID"),
   prior(student_t(3, 0, 2.5), class = "sigma")
 )
 
 priors4 <- c(
-  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"),
-  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"),
+  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"), #is this too strong a predictor?
+  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"), #is this too strong a predictor?
   prior(student_t(3, 0, 2.5), class = "sd"),
   prior(student_t(3, 0, 2.5), class = "sd", coef = "ADOS1", group = "Child.ID"),
   prior(student_t(3, 0, 2.5), class = "sd", coef = "verbalIQ1", group = "Child.ID"),
@@ -376,6 +377,7 @@ priors4 <- c(
 )
 
 #are there too many priors set for each model, am I overfitting? are these horribly done? should I not avoid b (flat)?
+#are the priors too strong?
 ```
 
 ## Prior Predictive Checking
@@ -544,11 +546,10 @@ pp_check(model3, ndraws = 100)
 pp_check(model4, ndraws = 100)
 
 
-#are the values valid, such as the negative values? Should I be omitting NA values? Are the priors tight enough?
+#are the values valid, such as the negative values? Are the priors tight enough or too overfit?
 ```
 
 ## Model Comparison
-
 ```{r compare_models}
 m1 <- add_criterion(model1, criterion = "loo")
 m2 <- add_criterion(model2, criterion = "loo")
@@ -558,12 +559,9 @@ m4 <- add_criterion(model4, criterion = "loo")
 #yet moment_match = T  gives an error, if important fix it later?
 
 m1
-
 m2
 #increased the delta to 0.95 after suggestion
-
 m3
-
 m4
 
 
@@ -578,17 +576,16 @@ bayes_R2(m4)
 #m4 has highest R2 alongside m1, with a slightly smaller Est. error
 ```
 # ESS values nicely high in m4, at least in population level (high convergence or something?)
-# best model is m4 (weight 1.000 in loo_model_weights, highest R2 alongside lowest Est.Error)
+# best model is m4 (weight 1.000 in loo_model_weights, highest R2, 0.813, alongside lowest Est.Error, 0.012)
 In the best model m4, CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 || Child.ID), the intercept estimated to be 1.12, falls between 0.89 to 1.35 95% of the time, meaning that the true population intercept for CHI_MLU lies between this value range 95% of the time. Since the estimate falls within this range, it's reasonable to conclude it is statistically plausible.
 
-DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes zero). Compared to TD, this means that those with DiagnosisASD have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero. Not statistically significant?
+DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes zero). Compared to TD, this means that those with DiagnosisASD have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero. Not statistically significant? Is it because of the ASD and TD individuals being spread over two distributions that both share? (low and high functioning ASD, normal and low functioning TD)
 
 The standard deviation values grouped by Child.ID tell how the CHI_MLU values vary by Child.ID, for example the Intercept varies with 95% certainty between 0.00 and 0.30. Some of the sd values have fairly low ESS, meaning that they are not as reliable and may not have generated enough diverse samples. Either that, or its a convergence or model specification issue.
 
 The Family Specific Parameter sigma provides information about the sd of the response variable CHI_MLU, the estimate of which is 0.41 (how spread out the variable is around the mean). the 95% range for this standard deviance is 0.37 to 0.44.
 
 ```{r test_hypotheses}
-model <- readRDS("data/model4_fit.rds")
 #how to test hypotheses?
 ```
 
@@ -629,10 +626,10 @@ demo <- demo %>%
   mutate(ADOS = if_else(is.na(ADOS) & Visit != 1, first(ADOS), ADOS))%>% #kind of unnecessary since I only care about 1st value due to the model specification
   mutate(ADOS1 = first(ADOS))%>%
   mutate(Socialization1 = first(Socialization))%>%
-  mutate(VerbalIQ1 = first(ExpressiveLangRaw))%>%
+  mutate(verbalIQ1 = first(ExpressiveLangRaw))%>%
   mutate(Diagnosis = if_else(Diagnosis == "A", "ASD", "TD"))%>%
-  group_by(Child.ID) %>% #can do this since the order of the children is the same in each dataframe
-  mutate(Child.ID = cur_group_id())
+  group_by(Child.ID) %>% 
+  mutate(Child.ID = cur_group_id()) #can do this since the order of the children is the same in each dataframe
 
 uld <- uld %>%
   rename(Visit = VISIT) %>%
@@ -653,7 +650,7 @@ test_data <- inner_join(demo,uld)
 test_data <- inner_join(test_data, token)
 
 test_data <- test_data %>%
-  select(Child.ID, Visit, Diagnosis, Socialization1, ADOS1, CHI_MLU, VerbalIQ1 )
+  select(Child.ID, Visit, Diagnosis, Socialization1, ADOS1, CHI_MLU, verbalIQ1)
 #was I wrong to use the 1st visit variables in the model?
 ```
 
@@ -661,20 +658,30 @@ Here we should be using a model that'd have some more interesting predictors (to
 
 Alternatively we could retrain the model to include visit 1 for all the test kids (and thus have the random effects)
 
-```{r train_model}
+```{r train and assess performance}
+model <- readRDS("data/model4_fit.rds")
 
-```
+posterior_samples <- posterior_predict(model, newdata = test_data, draws = 2000, allow_new_levels = TRUE)
+predicted_values <- colMeans(posterior_samples)
 
-Assess the performance of the model on the training data: root mean square error is a good measure. (Tip: google the function rmse())
+observed_values <- test_data$CHI_MLU
 
-```{r assess_performance}
-# Write your code here
+head(predicted_values)
+head(observed_values)
 
 
+rmse_value <- sqrt(mean((observed_values - predicted_values)^2))
+mae <- mean(abs(observed_values - predicted_values))
+print(paste("RMSE:", rmse_value, "&", "MAE:", mae))
+#[1] "RMSE: 1.10850774160828" error on average, mae 0.84 (average magnitude of errors between predicted and observed values)
+
+performance_rmse(model, normalized = FALSE)
+#Response residuals not available to calculate mean square error. (R)MSE is probably not reliable.
 ```
 
 
 Show how child fare in Child MLU compared to the average TD child at each visit
+
 ```{r child_performance_td_average}
 # Write your code here
 

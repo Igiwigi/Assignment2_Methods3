@@ -685,21 +685,23 @@ Relying on the model(s) you trained in part 2 of the exercise, create prediction
 
 Remove missing data to ease merging with predictions
 
-```{r remove_missing}
-# Write your code here
-
-
-```
-
-Here we should be using a model that'd have some more interesting predictors (to make sure we have something to predict)
-
-Alternatively we could retrain the model to include visit 1 for all the test kids (and thus have the random effects)
-
 ```{r train_model}
-# Write your code here
+model <- readRDS("data/model4_fit.rds")
+posterior_samples <- posterior_predict(model, newdata = test_data, draws = 100, allow_new_levels = T)
+predicted_values <- colMeans(posterior_samples)
+head(predicted_values)
+```
 
+Assess the performance of the model on the training data: root mean square error is a good measure. (Tip: google the function rmse())
+
+```{r assess_performance}
+# Write your code here
+performance::rmse(model, normalized = F, verbose = T)
+#Response residuals not available to calculate mean square error. (R)MSE is probably not reliable.
 
 ```
+
+
 
 Assess the performance of the model on the training data: root mean square error is a good measure. (Tip: google the function rmse())
 
