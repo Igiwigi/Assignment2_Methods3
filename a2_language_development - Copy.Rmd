@@ -93,6 +93,7 @@ As you work through these parts, you will have to produce a written document (se
 Below you can find more detailed instructions for each part of the assignment.
 
 # Analysis
+(still need to do this writeup)
 
 - Describe your sample (n, age, gender, clinical and cognitive features of the two groups) using plots and critically assess whether the groups (ASD and TD) are balanced.
 
@@ -566,25 +567,18 @@ m3
 m4
 
 
-
-m1R2 <- add_criterion(model1, criterion = "loo_R2")
-m2R2 <- add_criterion(model2, criterion = "loo_R2")
-m3R2 <- add_criterion(model3, criterion = "loo_R2")
-m4R2 <- add_criterion(model4, criterion = "loo_R2")
-
-m1R2
-m2R2
-m3R2
-m4R2
-
 loo_compare( m1, m2, m3, m4)
 loo_model_weights( m1, m2, m3, m4)
-
-
 #m4 favored over all models, weight 1.000 and 0.0, 0.0 is better than the minuses
+
+bayes_R2(m1)
+bayes_R2(m2)
+bayes_R2(m3)
+bayes_R2(m4)
+#m4 has highest R2 alongside m1, with a slightly smaller Est. error
 ```
 # ESS values nicely high in m4, at least in population level (high convergence or something?)
-# best model is m4
+# best model is m4 (weight 1.000 in loo_model_weights, highest R2 alongside lowest Est.Error)
 In the best model m4, CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 || Child.ID), the intercept estimated to be 1.12, falls between 0.89 to 1.35 95% of the time, meaning that the true population intercept for CHI_MLU lies between this value range 95% of the time. Since the estimate falls within this range, it's reasonable to conclude it is statistically plausible.
 
 DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes zero). Compared to TD, this means that those with DiagnosisASD have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero. Not statistically significant?
@@ -660,6 +654,7 @@ test_data <- inner_join(test_data, token)
 
 test_data <- test_data %>%
   select(Child.ID, Visit, Diagnosis, Socialization1, ADOS1, CHI_MLU, VerbalIQ1 )
+#was I wrong to use the 1st visit variables in the model?
 ```
 
 Here we should be using a model that'd have some more interesting predictors (to make sure we have something to predict)
@@ -667,8 +662,6 @@ Here we should be using a model that'd have some more interesting predictors (to
 Alternatively we could retrain the model to include visit 1 for all the test kids (and thus have the random effects)
 
 ```{r train_model}
-# Write your code here
-
 
 ```
 
