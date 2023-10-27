@@ -44,7 +44,9 @@ pacman::p_load(
   tidyverse,
   brms,
   patchwork,
-  ggplot2
+  ggplot2,
+  performance,
+  insights
 )
 
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
@@ -577,6 +579,7 @@ bayes_R2(m4)
 ```
 # ESS values nicely high in m4, at least in population level (high convergence or something?)
 # best model is m4 (weight 1.000 in loo_model_weights, highest R2, 0.813, alongside lowest Est.Error, 0.012)
+# since m3 performs better, maybe consider switching to it?
 In the best model m4, CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 || Child.ID), the intercept estimated to be 1.12, falls between 0.89 to 1.35 95% of the time, meaning that the true population intercept for CHI_MLU lies between this value range 95% of the time. Since the estimate falls within this range, it's reasonable to conclude it is statistically plausible.
 
 DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes zero). Compared to TD, this means that those with DiagnosisASD have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero. Not statistically significant? Is it because of the ASD and TD individuals being spread over two distributions that both share? (low and high functioning ASD, normal and low functioning TD)
@@ -584,12 +587,44 @@ DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes 
 The standard deviation values grouped by Child.ID tell how the CHI_MLU values vary by Child.ID, for example the Intercept varies with 95% certainty between 0.00 and 0.30. Some of the sd values have fairly low ESS, meaning that they are not as reliable and may not have generated enough diverse samples. Either that, or its a convergence or model specification issue.
 
 The Family Specific Parameter sigma provides information about the sd of the response variable CHI_MLU, the estimate of which is 0.41 (how spread out the variable is around the mean). the 95% range for this standard deviance is 0.37 to 0.44.
+```{r testing kfold}
+m1k <- kfold(
+  m1,
+  K = 10,
+  folds = NULL,
+  file = 'data/model1_kfold'
+)
+
+m2k <- kfold(
+  m2,
+  K = 10,
+  folds = NULL,
+  file = 'data/model2_kfold'
+)
+
+m3k <- kfold(
+  m3,
+  K = 10,
+  folds = NULL,
+  file = 'data/model3_kfold'
+)
+
+m4k <- kfold(
+  m4,
+  K = 10,
+  folds = NULL,
+  file = 'data/model4_kfold'
+)
+m1k
+m2k
+m3k
+m4k
+#which model is best based on this? m3?
+```
 
 ```{r test_hypotheses}
 #how to test hypotheses?
 ```
-
-"2. use your model to predict the linguistic trajectory of new children and assess the performance of the model based on that."
 
 # Prediction
 
@@ -659,9 +694,30 @@ Here we should be using a model that'd have some more interesting predictors (to
 Alternatively we could retrain the model to include visit 1 for all the test kids (and thus have the random effects)
 
 ```{r train and assess performance}
-model <- readRDS("data/model4_fit.rds")
+model <- readRDS("data/model4_fit.rds") #model 3 gives better results, consider switching to it?
+set.seed(1)
 
-posterior_samples <- posterior_predict(model, newdata = test_data, draws = 2000, allow_new_levels = TRUE)
+posterior_samples <- posterior_predict(model, newdata = test_data, draws = 100, allow_new_levels = T)
+predicted_values <- colMeans(posterior_samples) #is colMeans correct here?
+
+observed_values <- test_data$CHI_MLU
+
+head(predicted_values)
+head(observed_values)
+
+#attempting to give the brmsfit residuals so performance_rmse can get them
+model$residuals <- residuals(model)
+
+rmse_value <- sqrt(mean((observed_values - predicted_values)^2))
+mae <- mean(abs(observed_values - predicted_values))
+print(paste("RMSE:", rmse_value, "&", "MAE:", mae))
+#[1] "RMSE: 1.11" error on average, mae 0.84 (average magnitude of errors between predicted and observed values)
+```
+
+```{r train and assess performance, alternative model}
+model <- readRDS("data/model3_fit.rds") #model 3 gives better results, consider switching to it?
+
+posterior_samples <- posterior_predict(model, newdata = test_data, draws = 100, allow_new_levels = T)
 predicted_values <- colMeans(posterior_samples)
 
 observed_values <- test_data$CHI_MLU
@@ -673,16 +729,65 @@ head(observed_values)
 rmse_value <- sqrt(mean((observed_values - predicted_values)^2))
 mae <- mean(abs(observed_values - predicted_values))
 print(paste("RMSE:", rmse_value, "&", "MAE:", mae))
-#[1] "RMSE: 1.10850774160828" error on average, mae 0.84 (average magnitude of errors between predicted and observed values)
+#[1] "RMSE: 0.89" error on average, mae 0.71 (average magnitude of errors between predicted and observed values)
+```
+Model 3 is better in performing than model 4, at least when it comes to RMSE and MAE. However, the performance appears lackluster regardless considering how large the RMSE is compared to the range of values we are working with in CHI_MLU.
 
-performance_rmse(model, normalized = FALSE)
-#Response residuals not available to calculate mean square error. (R)MSE is probably not reliable.
+```{r CHI_MLU value range}
+data %>%
+  group_by(Diagnosis)%>%
+  summarize(
+    mean_MLU = mean(CHI_MLU, na.rm = TRUE),
+    max_MLU = max(CHI_MLU, na.rm = TRUE),
+    min_MLU = min(CHI_MLU, na.rm = TRUE)
+  )
+#the range of CHI_MLU values
 ```
 
 
-Show how child fare in Child MLU compared to the average TD child at each visit
-
+Show how ASD child fare in Child MLU compared to the average TD child at each visit
 ```{r child_performance_td_average}
-# Write your code here
+model_data <- model$data #model3
+
+#the mean is being based on the TD mean, "the average TD child at each visit"
+td_mean_data <- model_data %>%
+  subset(Diagnosis == "TD")%>%
+  group_by(Visit) %>%
+  summarize(Mean_CHI_MLU = mean(CHI_MLU))
+
+asd_mean_data <- model_data %>%
+  subset(Diagnosis == "ASD")%>%
+  group_by(Visit) %>%
+  summarize(Mean_CHI_MLU = mean(CHI_MLU))
+
+#adding low and high functioning for the sake of the plot
+model_data <- model_data %>%
+  left_join(td_mean_data, by = "Visit") %>%
+  mutate(functioning = ifelse(CHI_MLU >= Mean_CHI_MLU, "high", "low"))
+
+asd_data <- subset(model_data, Diagnosis == "ASD")
+td_data <- subset(model_data, Diagnosis == "TD")
+
+ggplot() +
+  geom_line(data = asd_data, aes(x = Visit, y = CHI_MLU, group = Child.ID, color = paste(Diagnosis, functioning, "func.")), size = 1, linetype = "solid") +
+  geom_line(data = asd_mean_data, aes(x = Visit, y = Mean_CHI_MLU, color = "ASD Mean"), size = 2, linetype = "solid", alpha = 0.7) +
+  geom_line(data = td_mean_data, aes(x = Visit, y = Mean_CHI_MLU, color = "TD Mean"), size = 2) +
+  labs(x = "Visits", y = "CHI_MLU", color = "Diagnosis &\nhigh/low function") +
+  scale_color_manual(values = c("ASD high func." = "red", "ASD low func." = "orange", "ASD Mean" = "darkred", "TD Mean" = "darkblue")) +
+  theme_minimal() +
+  theme(legend.position = "top", legend.title = element_text(face = "bold")) +
+  ggtitle("ASD development compared to TD mean\nfrom trained model data\nsplit into high/low functioning")
+
+
+#ratio between high and low functioning between diagnoses & visits (ignoring Child.id)
+model_data %>%
+  group_by(Diagnosis, Visit) %>%
+  summarize(
+    high_ratio = sum(functioning == "high") / n(),
+    low_ratio = sum(functioning == "low") / n(),
+    mean_CHI_MLU_diff = mean(CHI_MLU) - mean(Mean_CHI_MLU)
+  ) %>%
+  arrange(Visit)
+#TD children stay at the mean (because it is their mean), while ASD children veer away from it, getting behind visit-by-visit (on average), according to this trained model data
 
 ```
