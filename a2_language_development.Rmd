@@ -26,20 +26,15 @@ editor_options:
   chunk_output_type: console
 ---
 
-### TO-DO: 
-- actually answer the questions and knit this up nicely (clean up)
-- maybe lessen the amount of plots and pick the most informational ones to include
-- do the rest of the exercise (prediction)
-- check if priors etc. are properly done
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-# knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file()) 
 
 if(!'cmdstanr' %in% installed.packages()){
   remotes::install_github("stan-dev/cmdstanr")
-  cmdstanr::install_cmdstan()}
-
+  cmdstanr::install_cmdstan()
+}
+cmdstanr::check_cmdstan_toolchain(fix = TRUE)
+ 
 pacman::p_load(
   tidyverse,
   brms,
@@ -47,23 +42,37 @@ pacman::p_load(
   ggplot2,
   performance,
   gridExtra,
-  knitr
+  knitr,
+  sjstats,
+  cmdstanr,
+  rstan
 )
 
-setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
-getwd()
+# install.packages("pkgbuild")
+# 
+# rt_path = gsub("\\","/",pkgbuild::rtools_path(),fixed=T)
+# rt_bin = paste0(substr(rt_path,1,nchar(rt_path)-4),"/mingw_$(WIN)/bin/")
+# writeLines(paste0('PATH="',rt_path,';${PATH}"'), con = "~/.Renviron")
+# writeLines(paste0('Sys.setenv(BINPREF = "',rt_bin,'")'), con = "~/.Rprofile")
 
+# install_pkgs <- c("mingw-w64-ucrt-x86_64-make", "mingw-w64-ucrt-x86_64-gcc")
+# processx::run("pacman", args = c("-Sy", install_pkgs, "--noconfirm"))
+
+set_cmdstan_path("C:\\Users\\Igiba\\Desktop\\cmdstan-2.33.1")
+cmdstan_path()
+cmdstan_version()
+```
+
+```{r load_and_reclean_data}
 data <- read_csv("data/data_clean.csv") %>% 
   mutate(
     Gender = factor(Gender),
     Child.ID = factor(Child.ID),
     Diagnosis = factor(Diagnosis, levels = c("TD", "ASD"))
   )%>%
-  filter(Child.ID != 1) #has some stinky NA values for 1st visit which I wind up using in the models
+  rename(NonVerbal_IQ = MullenRaw, Verbal_IQ = ExpressiveLangRaw)
 
 sapply(data, class)
-
-set.seed(1)
 ```
 
 # Intro
@@ -82,7 +91,7 @@ Around 30 kids with ASD and 30 typically developing kids were videotaped (matche
 This data is in the file you prepared in the previous class, but you can also find it [here](https://www.dropbox.com/s/d6eerv6cl6eksf3/data_clean.csv?dl=0)
 
 
-## Assignment structure
+### Assignment structure
 
 We will be spending a few weeks with this assignment. In particular, we will:
 
@@ -97,17 +106,6 @@ As you work through these parts, you will have to produce a written document (se
 
 Below you can find more detailed instructions for each part of the assignment.
 
-# Analysis
-(still need to do this writeup)
-
-- Describe your sample (n, age, gender, clinical and cognitive features of the two groups) using plots and critically assess whether the groups (ASD and TD) are balanced.
-
-- Describe linguistic development (in terms of MLU over time) in TD and ASD children (as a function of group). Discuss the difference (if any) between the two groups
-
-- Describe individual differences in linguistic development: do all kids follow the same path? Are all kids reflected by the general trend for their group?
-
-- Include additional predictors in your model of language development (N.B. not other indexes of child language: types and tokens, that'd be cheating). Identify the best model, by conceptual reasoning, model comparison or a mix. Report the model you choose (and name its competitors, if any) and discuss why it's the best model.
-
 In working through this part of the assignment, keep in mind the following workflow:
 
 1. Formula definition
@@ -117,30 +115,19 @@ In working through this part of the assignment, keep in mind the following workf
 5. Model quality checks
 7. Model comparison
 
-## Describe Data
-#Describe your sample (n, age, gender, clinical and cognitive features of the two groups) (using plots)
-#critically assess whether the groups (ASD and TD) are balanced
-```{r describe_data}
+# Analysis
+## Describe your sample (n, age, gender, clinical and cognitive features of the two groups) using plots and critically assess whether the groups (ASD and TD) are balanced.
+
+I am using the dataset provided (not the one cleaned in part 1). I looked at the 1st visit to ascertain whether the sample groups were balanced.
+```{r describe_data_prep}
 first_visit <- data %>%
-  filter(Visit == 1) 
-
-unique_id_count <- data %>%
-  summarize(unique_count = n_distinct(Child.ID))
-cat("Number of unique IDs:", unique_id_count$unique_count, "\n")
-
-last_visit <- data %>%
-  filter(Visit == 6) 
-
+  filter(Visit == 1)
 ```
 
 ```{r describe_data (distribution)}
-data %>%
+first_visit %>%
   group_by(Diagnosis) %>%
-  summarize(Diagnosis = n())
-
-ggplot(data, aes(x = Diagnosis, fill = Diagnosis)) +
-  geom_bar() +
-  labs(title = "Spread of Conditions", x = "Condition", y = "Count")
+  summarize(Unique_Diagnoses = n_distinct(Child.ID))
 
 ggplot(first_visit, aes(x = Age, fill = Diagnosis)) +
   geom_histogram(binwidth = 5, color = "black") +
@@ -155,147 +142,124 @@ ggplot(first_visit, aes(x = Child.ID, fill = Diagnosis)) +
   geom_bar() +
   labs(title = "Distribution of Diagnoses by Ethnicity", x = "Ethnicity", y = "Count")+
   facet_wrap(~Ethnicity)
-#very few ethnicities represented outside of White
 
 first_visit %>%
-  group_by(Diagnosis, Child.ID, Ethnicity) %>%
-  summarize(unique_ethnicity_count = n_distinct(Ethnicity))
+  group_by(Diagnosis, Ethnicity) %>%
+  summarize(unique_ethnicity_count = n_distinct(Child.ID))
 
 first_visit %>%
   group_by(Ethnicity)%>%
   count(Ethnicity)
-#57 out of 66 are white, 3 more are half-white
 
 first_visit %>%
   group_by(Gender, Diagnosis) %>%
   summarize(Count = n()) %>%
   pivot_wider(names_from = Gender, values_from = Count) %>%
   mutate(Ratio_Women = F / sum(F), Ratio_Men = M / sum(M))
-#The gender ratios within ASD and TD are balanced, though the amount of females is still less by an incredible margin (this ratio balance is roughly the case W(46% ASD 55% TD) M(47% ASD, 53% TD))
 ```
+#### n (Diagnosis): 
+In my dataset, there are 65 children: 34 TD,31 ASD. Their ratio appears to be roughly 50/50 and therefore balanced.
+  
+#### Age: 
+The age on visit 1 varies, with the youngest child being about ~20 months old, while the oldest was ~40 months old. The youngest were TD individuals, oldest ASD. Reason for this might be the fact that, developmentally, the children may be in a similar development/cognitive skill bracket, with ASD children simply being slower to develop. As such, it's hard to say whether this is a balance issue.
+  
+#### Gender: 
+Though within genders the diagnoses appear to be balanced at roughly 50%, there are much fewer girls in the experiment (11 girls, 55 boys). This makes the experiment extremely unbalanced in terms of gender.
+  
+#### Ethnicity: 
+Of the 65 children 56 are fully "White" with there being only one Asian, for example. This makes the experiment very skewed in terms of ethnicity; though whether this matters or not is hard to say.
 
-```{r describe_data (clinical & cognitive features)}
-ggplot(data, aes(x = MullenRaw, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  # Add density plot with transparency
+### Balance:
+When it comes to these metrics, the children are balanced in terms of Diagnosis, but not Gender. It's hard to say whether Age is unbalanced, as it might be difficult to choose children, in particular ASD, who are developmentally similar. Ethnicity is very unbalanced, though it is possible that this was not a variable thought to be significant for this experiment. That said, this does mean that most of the children probably come from similar cultures with similar child-rearing methods.
+
+```{r describe_data_visually}
+#Non-verbal IQ
+ggplot(first_visit, aes(x = NonVerbal_IQ, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
   labs(title = "Non-verbal IQ", x = "MullenRaw", y = "Density")+
   guides(fill = guide_legend(title = "Diagnosis"))
-#Non-verbal IQ is not as weak for the autistic individuals as their verbal iq, but still lower. Some non-diagnosed individuals however seem to be "part of the same distribution" visually as the ones diagnosed with ASD, same the other way around, though to a lesser extent.
-#is it not such a distinguishing aspect of autism?
 
-ggplot(data, aes(x = ADOS, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  # Add density plot with transparency
-  labs(title = "Severity of Autistic Symptoms", x = "ADOS", y = "Density")+
-  guides(fill = guide_legend(title = "Diagnosis"))
-#naturally, the ones diagnosed with autism are the ones with severity of autistic symptoms, checks out
-
-ggplot(data, aes(x = ExpressiveLangRaw, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  # Add density plot with transparency
+#Verbal IQ
+ggplot(first_visit, aes(x = Verbal_IQ, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
   labs(title = "Distributions of Verbal IQ", x = "ExpressiveLangRaw", y = "Density")+
   guides(fill = guide_legend(title = "Diagnosis"))
-#worse for the autistic ones, some TD individuals however also seem to be "part of the same distribution" visually as the diagnosed individuals
-#not a very distinguishing aspect of autism?
 
-ggplot(data, aes(x = Socialization, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  # Add density plot with transparency
+#ADOS
+ggplot(first_visit, aes(x = ADOS, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
+  labs(title = "Severity of Autistic Symptoms", x = "ADOS", y = "Density")+
+  guides(fill = guide_legend(title = "Diagnosis"))
+
+first_visit %>%
+  group_by(Diagnosis)%>%
+  summarise(mean_ADOS = mean(ADOS))
+
+#Socialization
+ggplot(first_visit, aes(x = Socialization, fill = Diagnosis)) +
+  geom_density(alpha = 0.5) +  
   labs(title = "Distributions of Social interaction skills, responsiveness", x = "Socialization", y = "Density")+
   guides(fill = guide_legend(title = "Diagnosis"))
-#worse for those with ASD overall, though some diagnosed are more "higher functioning" than others?
 
-ggplot(data, aes(x = CHI_MLU, fill = Diagnosis)) +
+#CHI_MLU
+ggplot(first_visit, aes(x = CHI_MLU, fill = Diagnosis)) +
   geom_density(alpha = 0.5) +  
   labs(title = "Density Plot of Mean Length of Utterance (child)", x = "MLU", y = "Density") +
   guides(fill = guide_legend(title = "Diagnosis"))
-#ASD children have shorter mean length utterances
 
-ggplot(data, aes(x = types_CHI, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  
-  labs(title = "Types of unique words for children", x = "types", y = "Density") +
-  guides(fill = guide_legend(title = "Diagnosis"))
-#much less unique words for ASD
-
-ggplot(data, aes(x = tokens_CHI, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  
-  labs(title = "Total words for children", x = "tokens", y = "Density") +
-  guides(fill = guide_legend(title = "Diagnosis"))
-#less words for ASD children overall
 ```
+### Cognitive features analysis (visually & first visit):
+  
+#### Non-verbal IQ:
+TD and ASD children peak at roughly the same mean value, but ASD children's distribution has fatter tails, indicating that some ASD children have much lower Non-verbal IQ than the mean or much higher (max values at visit 1 are that of ASD children)
+  
+#### Verbal IQ:
+TD children have a distribution with 2 peaks with most TD children having a similar level of Verbal IQ. That said, the second, smaller peak consists of TD children with higher than mean Verbal IQ, indicating that some are faster at developing their Verbal IQ than most.
 
-```{r describe_data (1st visit)}
-ggplot(data, aes(x = ADOS1, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) + 
-  labs(title = "Severity of Autistic Symptoms on visit 1", x = "ADOS", y = "Density")+
-  guides(fill = guide_legend(title = "Diagnosis"))
+For ASD children, the distribution is a lot less "clear" and evenly distributed, with some being on par with both the "average" and "gifted" TD children. That said, the highest "peak" for ASD children is near the bottom, indicating that, though some ASD children can keep up with TD children in terms of Verbal IQ, there are some who cannot.
 
-ggplot(data, aes(x = verbalIQ1, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  
-  labs(title = "Verbal IQ on visit 1", x = "Verbal IQ", y = "Density")+
-  guides(fill = guide_legend(title = "Diagnosis"))
-#overall worse for ASD, but certain ASD are "high-functioning" and certain TD are "lower-functioning" in this regard (individual differences)
+#### ADOS:
+Most TD children have 0 ADOS (severity of autistic symptoms), though there are a couple with more, going up to ~5. These children could be undiagnosed ASD children, but this is not necessarily the case. (mean = 0.9)
+Naturally, the ASD children are the ones with consistent values of ADOS over 5. (mean = 14)
 
-ggplot(data, aes(x = nonVerbalIQ1, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  
-  labs(title = "Non-verbal IQ on visit 1", x = "non-verbal IQ", y = "Density")+
-  guides(fill = guide_legend(title = "Diagnosis"))
-#not so different between the diagnoses
+#### Socialization:
+TD children are again rather stable centered around a specific "distributional peak" with some being lower or higher in terms of their Socialization value; their values are predictable and even appear roughly gaussian.
 
-ggplot(data, aes(x = Socialization1, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  
-  labs(title = "Social interaction skills and responsiveness on visit 1", x = "Socialization", y = "Density")+
-  guides(fill = guide_legend(title = "Diagnosis"))
-#Lower overall for ASD, but there are some more "higher-functioning" ASD individuals and some lower functioning TD (individual differences)
-#distinguishing
-```
+ASD children have, for the most part, lower (and lowest) Socialization values (that is, social interaction skills and responsiveness) but this is not the case for all ASD children, as some (though few) can compete with TD values.
 
+#### CHI_MLU:
+TD children are fairly stable around their peak with lesser tails.
+
+Most ASD children have comparative values to TD, but the fat tails indicate that there is much variability, with some even having higher mean length utterances than TD children.
+  
+#### Balance:
+TD children tend to have rather stable density plots with few tails, with most TD children having "predictable" values around the mean, that is to say, they are developmentally comparable on many cognitive values with little spread. There are cases where certain TD children are more gifted than others, for example on Verbal IQ.
+
+The density plots of ASD children are less Gaussian and often possess fat tails, indicating that their development on these cognitive features varies and is highly dependent on the individual; for example, some ASD individuals do not struggle with Verbal IQ while others are practically non-verbal.
+
+In terms of balance it's hard to say, though perhaps the ASD individuals could've been somehow more balanced in the dataset; for example, the data could've been collected for children with a specific range of ADOS values, so as to avoid having too many "extreme" ASD children or too many "mild" ASD children? 
+This depends on what the exact goal of the data is though, it might be beneficial to have a model that can diagnose milder cases than a model that is affected by the "obvious" ASD children with high ADOS.
+
+
+## Describe linguistic development (in terms of MLU over time) in TD and ASD children (as a function of group). Discuss the difference (if any) between the two groups
 ```{r describe_data (MLU over visits)}
+#CHI_MLU over time
 ggplot(data, aes(x = Visit, y = CHI_MLU, color = Diagnosis)) +
   geom_point() +
   geom_smooth(method = "lm", formula = y ~ x, se = FALSE, aes(group = Diagnosis)) +
   labs(title = "Development of MLU Over Time", x = "Visit", y = "Mean Length of Utterance (MLU)") +
   theme_minimal()
-#roughly speaking, ASD & TD children begin with the same mean MLU, but TD children progress faster overall (higher slope). That said, there are differences between individual children, especially those diagnosed, as some are "high functioning" and match TD MLU values, and others are noticeably below: as in, "low-functioning". In the 1st visit, some ASD children even have a noticeably higher MLU than most, if not all, TD children.
 
-#comparing distributions for 1st and last visit CHI_MLU
-first_visit$Visit_Type <- "First Visit"; last_visit$Visit_Type <- "Last Visit"
-first_last_combo <- rbind(first_visit, last_visit)
-
-ggplot(first_last_combo, aes(x = CHI_MLU, fill = Diagnosis)) +
-  geom_density(alpha = 0.5) +  
-  labs(title = "Density Plot of Mean Length of Utterance (child)", x = "MLU", y = "Density") +
-  guides(fill = guide_legend(title = "Diagnosis")) +
-  facet_wrap(~Visit_Type)
-
-first_last_combo %>%
-  group_by(Diagnosis, Visit_Type) %>%
-  summarize(mean_MLU = mean(CHI_MLU, na.rm = TRUE), max_MLU = max(CHI_MLU, na.rm = TRUE), min_MLU = min(CHI_MLU, na.rm = TRUE))
-#the mean MLU for ASD & TD children was the same overall on 1st visit, but TD children improved on this faster, resulting in a higher mean for visit 6.
-#the Max MLU for ASD children is 3.4 for the first visit, as opposed to 1.94 for the TD children (autistic utterance genius?) Though this advantage peters off.
-#There appear to be some near-mute ASD children, as well (min value 0 and 0.0156 for 1st and 6th visit respectively) Comparatively, by visit 6, TD children have a min MLU of 2.07 (this is higher than the ASD mean of 1.89 by this point)
-
-```
-
-```{r describe_data (Verbal IQ Development per child ID)}
-#ExpressiveLangRaw per child ID (to illustrate the difference in trajectories of learning)
-ggplot(data, aes(x = Visit, y = ExpressiveLangRaw, color = Diagnosis)) +
+ggplot(data, aes(x = Visit, y = CHI_MLU, color = Diagnosis)) +
   geom_point() +
   geom_smooth(method = "lm", formula = y ~ x, se = FALSE, aes(group = Child.ID)) +
-  labs(title = "Verbal IQ Over Time, for each child", x = "Visit", y = "ExpressiveLangRaw") +
+  labs(title = "Development of MLU Over Time", x = "Visit", y = "Mean Length of Utterance (MLU)") +
   theme_minimal()
 
-ggplot(data, aes(x = Visit, y = ExpressiveLangRaw, color = Diagnosis)) +
-  geom_point() +
-  geom_smooth(method = "lm", formula = y ~ x, se = FALSE, aes(group = Diagnosis)) +
-  labs(title = "Verbal IQ Over Time, for each child", x = "Visit", y = "ExpressiveLangRaw") +
-  theme_minimal()
-#loses out on a lot of the individual differences between slopes
-
-#there are children with downwards going slopes (value higher on 1st than 6th visit)
 data %>%
-  filter(Visit %in% c(1, 6)) %>%  # Filter for only visits 1 and 6
-  group_by(Child.ID, Visit, Diagnosis) %>%
-  summarize(min_ELR = min(ExpressiveLangRaw)) %>%
-  pivot_wider(names_from = Visit, values_from = min_ELR) %>%
-  filter(`1` > `6`)
-#2 children whose visit 6 ExpressiveLangRaw is lower than their visit 1, both ASD, slope is negative because it appears they did not significantly progress (similar values) -> slope being negative is not particularly meaningful.
+  group_by(Diagnosis, Visit) %>%
+  filter(Visit == 1 | Visit == 6)%>%
+  summarize(mean_MLU = mean(CHI_MLU, na.rm = TRUE), max_MLU = max(CHI_MLU, na.rm = TRUE), min_MLU = min(CHI_MLU, na.rm = TRUE))
 
 data %>%
   filter(Visit %in% c(1, 6)) %>%  # Filter for only visits 1 and 6
@@ -303,100 +267,126 @@ data %>%
   summarize(min_MLU = min(CHI_MLU)) %>%
   pivot_wider(names_from = Visit, values_from = min_MLU) %>%
   filter(`1` > `6`)
-# there are 6 children whose visit 6 MLU is lower than their visit 1, all ASD, slope is negative because it appears they did not significantly progress (similar values), as such, the fact that the slope is negative is, for most of them, not the significant part. Probably more ASD children whose MLU remained the same but whose slope is slightly positive. Still, there are two children for whom the values appeared to go down ""significantly"" (ID 23, 1 -> 0.5 & ID 36, 1.25 - 0.754)
+```
+#### MLU over time:
+On visit 1, both TD and ASD children have a mean MLU of about 1.3. By visit 6, however, TD have developed much faster, with a mean MLU of 2.93, while ASD children have only gotten to the mean of 1.89. This would indicate that TD children, as a whole, develop faster in terms of MLU.
+
+## Describe individual differences in linguistic development: do all kids follow the same path? Are all kids reflected by the general trend for their group?
+Looking at individuals, TD children appear to have a rather predictable MLU development, with most following the mean and even visually appearing to have similar slopes. ASD children, however, vary widely individual-to-individual, with some even having a negative developmental slope. This would indicate that ASD children have a much more unpredictable development of MLU than TD children. In fact, 6 ASD children have a lower MLU value on visit 6 than they do on visit 1.
+
+#Model making
+
+```{r fixing_NA}
+#fixing NA by replacing the NA with a value from a visit before or after (by Child.ID), kind of sloppy but should work
+
+noNa <- data %>%
+  arrange(Child.ID, Visit) %>%
+  group_by(Child.ID) %>%
+  mutate(across(everything(), ~ ifelse(is.na(.), lag(., default = NA), .)))
+
+for (i in 1:10) {
+  noNa <- noNa %>%
+    arrange(Child.ID, Visit) %>%
+    group_by(Child.ID) %>%
+    mutate(across(everything(), ~ ifelse(is.na(.), lag(., default = NA), .)))
+}
+
+#if certain values didnt get filled in due to missing in such a way where lag cannot help (being 1st or having no values before)
+for (i in 1:10) {
+noNa <- noNa %>%
+  arrange(Child.ID, Visit) %>%
+  group_by(Child.ID) %>%
+  mutate(across(everything(), ~ ifelse(is.na(.), lead(., default = NA), .)))
+}
+
+#omitting children with bad data by hand since so few datapoints
+noNa <- noNa %>%
+  filter(Child.ID != 12 & Child.ID != 24 & Child.ID != 49 & Child.ID != 51 & Child.ID != 1) #12, 24, 49, 51, 1 have few visits with a lot of missing data, none of which can be filled in
 ```
 
 ## Formula Definition
 
-```{r define_formulas}
-#Based on my earlier (mostly visual) findings, I believe the following:
-#MullenRaw (non-verbal IQ) is not particularly distinguishing for the conditions and therefore can be omitted
-#ADOS definitely distinguishes the conditions and ties into CHI_MLU as a result
-#ExpressiveLangRaw (verbal IQ) is more distinguishing than MullenRaw and should be used in the model.
-#Socialization definitely distinguishes the conditions (differing heavily between conditions)
+Include additional predictors in your model of language development (N.B. not other indexes of child language: types and tokens, that'd be cheating). Identify the best model, by conceptual reasoning, model comparison or a mix. Report the model you choose (and name its competitors, if any) and discuss why it's the best model.
 
-formula1 <-
-  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit|Child.ID))
+
+Based on my earlier (mostly visual) findings, I believe the following:
+non-verbal IQ is not particularly distinguishing (on visit 1) for the conditions and therefore can be omitted (both TD and ASD peak at similar values, though ASD have fatter tails)
+ADOS1 definitely distinguishes the conditions and ties into CHI_MLU as a result
+Verbal IQ is more distinguishing than non-verbal IQ and should be used in the model.
+Socialization definitely distinguishes the conditions (differing heavily between conditions)
+```{r define_formulas}
+formula1 <- 
+  brms::bf(CHI_MLU ~ 1  + Visit + Diagnosis + MOT_MLU + Gender + Age + (1|Child.ID))
 
 formula2 <-
-  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1||Child.ID))
+  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis +  MOT_MLU + Gender + Age + (1 + Visit + ADOS1 ||Child.ID))
 
-formula3 <- brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + (1|Child.ID)))
+formula3 <- brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1||Child.ID))
 
 formula4 <-
   brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 ||Child.ID))
-#visit effect and the effect of ADOS, socialization, verbal iq differ per child, is this valid?
-#are these overcomplicated, overfit?
-#using 1st visit variables because there are no NAs (can compare with loo because same amount of data points); is this valid?
 
+#should I be using Visit variables if trying by 1st visit?
 ```
 
 ## Prior Definition
-
-```{r define_priors}
-#auto_prior did not work, why? will try setting them all by hand, hopefully at least mildly correctly done?
-# As auto_prior() also sets priors on the intercept, the model formula used in brms::brm() must be rewritten to something like y ~ 0 + intercept ..., see set_prior. --is it this?
-
-get_prior(formula1, data = data)
-get_prior(formula2, data = data)
-get_prior(formula3, data = data)
-get_prior(formula4, data = data)
-
-priors1 <- c(
-  prior(normal(0,2), class = "b", coef = "DiagnosisASD"), #is this too strong a predictor?
-  prior(lkj(1), class = "cor"),
-  prior(student_t(3, 1.9, 2.5), class = "Intercept"),
-  prior(student_t(3, 0, 2.5), class = "sd"),
-  prior(student_t(3,0,2.5), class = "sd", coef = "Visit", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sd", coef = "Intercept", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sigma")
+```{r fitting models}
+m1 <- brms::brm(
+  formula1,
+  data = noNa,
+  family = gaussian(),  
+  chains = 4,
+  cores = 2,
+  backend = "cmdstanr"
 )
 
-priors2 <- c(
-  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"), #is this too strong a predictor?
-  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"), #is this too strong a predictor?
-  prior(student_t(3, 0, 2.5), class = "sd"),
-  prior(student_t(3, 0, 2.5), class = "sd", coef = "ADOS1", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sigma")
+m2 <- brms::brm(
+  formula2,
+  data = noNa,
+  family = gaussian(), 
+  chains = 4,
+  cores = 2,
+  backend = "cmdstanr"
 )
 
-priors3 <- c(
-  prior(student_t(3, 0, 2.5), class = "b", coef = "ADOS1"), #is this too strong a predictor?
-  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"), #is this too strong a predictor?
-  prior(student_t(3, 0, 2.5), class = "b", coef = "Socialization1"), #is this too strong a predictor?
-  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"), #is this too strong a predictor?
-  prior(student_t(3, 0, 2.5), class = "sd", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sigma")
+m3 <- brms::brm(
+  formula3,
+  data = noNa,
+  family = gaussian(),
+  chains = 4,
+  cores = 2,
+  backend = "cmdstanr"
 )
 
-priors4 <- c(
-  prior(student_t(3, 0, 2.5), class = "b", coef = "DiagnosisASD"), #is this too strong a predictor?
-  prior(student_t(3, 0, 2.5), class = "b", coef = "Visit"), #is this too strong a predictor?
-  prior(student_t(3, 0, 2.5), class = "sd"),
-  prior(student_t(3, 0, 2.5), class = "sd", coef = "ADOS1", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sd", coef = "verbalIQ1", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sd", coef = "Intercept", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sd", coef = "Socialization1", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sd", coef = "Visit", group = "Child.ID"),
-  prior(student_t(3, 0, 2.5), class = "sigma")
+m4 <- brms::brm(
+  formula4,
+  data = noNa,
+  family = gaussian(),
+  chains = 4,
+  cores = 2,
+  backend = "cmdstanr"
 )
+```
 
-#are there too many priors set for each model, am I overfitting? are these horribly done? should I not avoid b (flat)?
-#are the priors too strong?
+
+```{r defining_priors}
+auto_priors1 <- sjstats::auto_prior(m1$formula, data, TRUE)
+auto_priors2 <- sjstats::auto_prior(m2$formula, data, TRUE)
+auto_priors3 <- sjstats::auto_prior(m3$formula, data, TRUE)
+auto_priors4 <- sjstats::auto_prior(m4$formula, data, TRUE)
+
 ```
 
 ## Prior Predictive Checking
 
 By setting *sample_prior* parameter is set to "only" in the **brm** function, draws are drawn solely from the priors, thus ignoring the likelihood. This allows among other things to generate draws from the prior predictive distribution.
-
 ```{r prior predictive checking}
 model1_prior <- brm(
   formula1,
-  data,
+  noNa,
   family = gaussian,
-  prior = priors1,
+  prior = prior1,
   sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
-  file = 'data/model1_prior',
   backend = "cmdstanr",
   chains = 2,
   stan_model_args = list(stanc_options = list("O1"))
@@ -405,11 +395,11 @@ prior_predictive1 <- pp_check(model1_prior, ndraws = 100)
 
 model2_prior <- brm(
   formula2, 
-  data,
+  noNa,
   family = gaussian,
-  prior = priors2,
+  prior = prior2,
   sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
-  file = 'data/model2_prior',
+  #file = 'data/model2_prior',
   backend = "cmdstanr",
   chains = 2,
   stan_model_args = list(stanc_options = list("O1"))
@@ -419,11 +409,11 @@ prior_predictive2 <- pp_check(model2_prior, ndraws = 100)
 
 model3_prior <- brm(
   formula3, 
-  data,
+  noNa,
   family = gaussian,
-  prior = priors3,
+  prior = prior3,
   sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
-  file = 'data/model3_prior',
+  #file = 'data/model3_prior',
   backend = "cmdstanr",
   chains = 2,
   stan_model_args = list(stanc_options = list("O1"))
@@ -433,11 +423,11 @@ prior_predictive3 <- pp_check(model3_prior, ndraws = 100)
 
 model4_prior <- brm(
   formula4, #is this stinkying it up?
-  data,
+  noNa,
   family = gaussian,
-  prior = priors4,
+  prior = prior4,
   sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
-  file = 'data/model4_prior',
+  #file = 'data/model4_prior',
   backend = "cmdstanr",
   chains = 2,
   stan_model_args = list(stanc_options = list("O1"))
@@ -446,12 +436,9 @@ prior_predictive4 <- pp_check(model4_prior, ndraws = 100)
 
 prior_predictive1 + prior_predictive2 
 prior_predictive3 + prior_predictive4
-#are these too narrow or good? should they not look a bit differently distributed?
-
 ```
 
 ## Model Fitting
-
 ```{r fit_model}
 prior1model <- readRDS('data/model1_prior.rds')
 prior2model <- readRDS('data/model2_prior.rds')
@@ -490,7 +477,7 @@ model2 <- brm(
   cores = 2,
   threads = threading(2),
   control = list(
-    adapt_delta = 0.95, #set above 0.9 due to error
+    adapt_delta = 0.9, 
     max_treedepth = 20
   ),
   stan_model_args = list(stanc_options = list("O1"))
@@ -528,17 +515,14 @@ model4 <- brm(
   cores = 2,
   threads = threading(2),
   control = list(
-    adapt_delta = 0.95,
+    adapt_delta = 0.9,
     max_treedepth = 20
   ),
   stan_model_args = list(stanc_options = list("O1"))
 )
-
-#lots of Chain 2 errors, is the model misspecified? Are the priors misspecified?
 ```
 
 ## Model quality checks
-
 ```{r check_models}
 plot(model1)
 plot(model2)
@@ -549,9 +533,6 @@ pp_check(model1, ndraws = 100)
 pp_check(model2, ndraws = 100)
 pp_check(model3, ndraws = 100)
 pp_check(model4, ndraws = 100)
-
-
-#are the values valid, such as the negative values? Are the priors tight enough or too overfit?
 ```
 
 ## Model Comparison
@@ -560,19 +541,16 @@ m1 <- add_criterion(model1, criterion = "loo")
 m2 <- add_criterion(model2, criterion = "loo")
 m3 <- add_criterion(model3, criterion = "loo")
 m4 <- add_criterion(model4, criterion = "loo") 
-#Found 12 observations with a pareto_k > 0.7 in model 'model1'. It is recommended to set 'moment_match = TRUE' in order to perform moment matching for problematic observations.  
-#yet moment_match = T  gives an error, if important fix it later?
+
 
 m1
 m2
-#increased the delta to 0.95 after suggestion
 m3
 m4
 
 
 loo_compare( m1, m2, m3, m4)
 loo_model_weights( m1, m2, m3, m4)
-#m4 favored over all models, weight 1.000 and 0.0, 0.0 is better than the minuses
 
 bayes_R2(m1)
 bayes_R2(m2)
@@ -580,16 +558,14 @@ bayes_R2(m3)
 bayes_R2(m4)
 #m4 has highest R2 alongside m1, with a slightly smaller Est. error
 ```
-ESS values nicely high in m4, at least in population level (high convergence or something?)
-best model is m4 (weight 1.000 in loo_model_weights, highest R2, 0.813, alongside lowest Est.Error, 0.012)
+in loo_compare and loo_model_weights, Model 4 favored above all other models (1.00 vs 0.0 others)
+Model 4 also has the highest Bayesian R2 (0.81) and lowest Est. error (0.012) with Model 1 following closely behind despite being much more simple (0.81 and 0.013 respectively)
 
-!!! since m3 performs better on prediction, maybe consider switching to it? !!!
+In the best model m4, CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 ||Child.ID), the intercept is estimated to be 1.12, falls between 0.89 and 1.35 95% of the time, meaning that the true population intercept for CHI_MLU lies between this value 95% of the time. Since the estimate falls within this range, it's reasonable to conclude it is statistically plausible.
 
-In the best model m4, CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 || Child.ID), the intercept estimated to be 1.12, falls between 0.89 to 1.35 95% of the time, meaning that the true population intercept for CHI_MLU lies between this value range 95% of the time. Since the estimate falls within this range, it's reasonable to conclude it is statistically plausible.
+DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes zero, which might indicate that some ASD individuals have the same CHI_MLU as TD, meaning that they do not essentially differ in a statistically significant manner). Compared to TD, this means that those with DiagnosisASD have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero.
 
-DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes zero). Compared to TD, this means that those with DiagnosisASD have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero. Not statistically significant? Is it because of the ASD and TD individuals being spread over two distributions that both share? (low and high functioning ASD, normal and low functioning TD)
-
-The standard deviation values grouped by Child.ID tell how the CHI_MLU values vary by Child.ID, for example the Intercept varies with 95% certainty between 0.00 and 0.30. Some of the sd values have fairly low ESS, meaning that they are not as reliable and may not have generated enough diverse samples. Either that, or its a convergence or model specification issue.
+The standard deviation values grouped by Child.ID tell how the CHI_MLU values vary by Child.ID, for example the Intercept varies with 95% certainty between 0.12 and 0.20. Some of the sd values have fairly low ESS, meaning that they are not as reliable and may not have generated enough diverse samples. Either that, or its a convergence or model specification issue.
 
 The Family Specific Parameter sigma provides information about the sd of the response variable CHI_MLU, the estimate of which is 0.41 (how spread out the variable is around the mean). the 95% range for this standard deviance is 0.37 to 0.44.
 ```{r testing kfold, cache=T, results = 'hide', message=FALSE }
@@ -622,7 +598,6 @@ m4k <- kfold(
 )
 ```
 
-
 ```{r testing kfold2}
 m1k <- readRDS("data/model1_prior.rds")
 m2k <- readRDS("data/model2_prior.rds")
@@ -633,12 +608,8 @@ m1k
 m2k
 m3k
 m4k
-#which model is best based on this?
 ```
 
-```{r test_hypotheses}
-#how to test hypotheses?
-```
 
 # Prediction
 
