@@ -14,3 +14,9 @@ patchwork
 performance
 gridExtra
 knitr
+sjstats
+cmdstanr
+StanHeaders
+rstan
+tidybayes
+Metrics

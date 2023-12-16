@@ -5,14 +5,11 @@ author: Ingrid Backman
 output:
   html_document:
       toc: yes
-      number_sections: yes
+      number_sections: no
       toc_float: yes
       theme: united
       highlight: espresso
       css: '../../varia/standard.css'
-  pdf_document:
-    toc: no
-    number_sections: yes
 geometry: margin=1in
 knit: (function(inputFile, encoding) {
   browseURL(
@@ -34,7 +31,9 @@ if(!'cmdstanr' %in% installed.packages()){
   cmdstanr::install_cmdstan()
 }
 cmdstanr::check_cmdstan_toolchain(fix = TRUE)
- 
+
+setwd("C:/Users/Igiba/Documents/Assignment2_Methods3")
+getwd()
 pacman::p_load(
   tidyverse,
   brms,
@@ -45,7 +44,9 @@ pacman::p_load(
   knitr,
   sjstats,
   cmdstanr,
-  rstan
+  rstan,
+  tidybayes,
+  Metrics
 )
 
 # install.packages("pkgbuild")
@@ -63,7 +64,7 @@ cmdstan_path()
 cmdstan_version()
 ```
 
-```{r load_and_reclean_data}
+```{r load_and_reclean_data, results = 'hide'}
 data <- read_csv("data/data_clean.csv") %>% 
   mutate(
     Gender = factor(Gender),
@@ -124,7 +125,7 @@ first_visit <- data %>%
   filter(Visit == 1)
 ```
 
-```{r describe_data (distribution)}
+```{r describe_data (distribution), warning = F}
 first_visit %>%
   group_by(Diagnosis) %>%
   summarize(Unique_Diagnoses = n_distinct(Child.ID))
@@ -169,10 +170,10 @@ Though within genders the diagnoses appear to be balanced at roughly 50%, there 
 #### Ethnicity: 
 Of the 65 children 56 are fully "White" with there being only one Asian, for example. This makes the experiment very skewed in terms of ethnicity; though whether this matters or not is hard to say.
 
-### Balance:
+#### Balance:
 When it comes to these metrics, the children are balanced in terms of Diagnosis, but not Gender. It's hard to say whether Age is unbalanced, as it might be difficult to choose children, in particular ASD, who are developmentally similar. Ethnicity is very unbalanced, though it is possible that this was not a variable thought to be significant for this experiment. That said, this does mean that most of the children probably come from similar cultures with similar child-rearing methods.
 
-```{r describe_data_visually}
+```{r describe_data_visually, warning = F}
 #Non-verbal IQ
 ggplot(first_visit, aes(x = NonVerbal_IQ, fill = Diagnosis)) +
   geom_density(alpha = 0.5) +  
@@ -242,7 +243,7 @@ This depends on what the exact goal of the data is though, it might be beneficia
 
 
 ## Describe linguistic development (in terms of MLU over time) in TD and ASD children (as a function of group). Discuss the difference (if any) between the two groups
-```{r describe_data (MLU over visits)}
+```{r describe_data (MLU over visits), warning = F}
 #CHI_MLU over time
 ggplot(data, aes(x = Visit, y = CHI_MLU, color = Diagnosis)) +
   geom_point() +
@@ -305,7 +306,6 @@ noNa <- noNa %>%
 ```
 
 ## Formula Definition
-
 Include additional predictors in your model of language development (N.B. not other indexes of child language: types and tokens, that'd be cheating). Identify the best model, by conceptual reasoning, model comparison or a mix. Report the model you choose (and name its competitors, if any) and discuss why it's the best model.
 
 
@@ -319,74 +319,74 @@ formula1 <-
   brms::bf(CHI_MLU ~ 1  + Visit + Diagnosis + MOT_MLU + Gender + Age + (1|Child.ID))
 
 formula2 <-
-  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis +  MOT_MLU + Gender + Age + (1 + Visit + ADOS1 ||Child.ID))
+  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis +  MOT_MLU + Gender + Age + (1 + Visit + ADOS1 + Diagnosis ||Child.ID))
 
-formula3 <- brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1||Child.ID))
+formula3 <- brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + MOT_MLU + Gender+ Age+ (1 + Visit + ADOS1 + Socialization1 + Diagnosis||Child.ID))
 
 formula4 <-
-  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 ||Child.ID))
-
-#should I be using Visit variables if trying by 1st visit?
+  brms::bf(CHI_MLU ~ 1 + Visit + Diagnosis + MOT_MLU + Gender+ Age+(1 + Visit + ADOS1 + Socialization1 + verbalIQ1 + Diagnosis||Child.ID))
 ```
 
 ## Prior Definition
-```{r fitting models}
-m1 <- brms::brm(
-  formula1,
-  data = noNa,
-  family = gaussian(),  
-  chains = 4,
-  cores = 2,
-  backend = "cmdstanr"
+
+```{r define_priors, message = F, results= 'hide', warning = F}
+get_prior(formula1, data = data) %>% kable()
+get_prior(formula2, data = data) %>% kable()
+get_prior(formula3, data = data) %>% kable()
+get_prior(formula4, data = data) %>% kable()
+
+priors1 <- c(
+  prior(normal(0, 2), class = b, coef = Age),
+prior(normal(0, 2), class = b, coef = DiagnosisASD),
+prior(normal(0, 2), class = b, coef = GenderM),
+prior(normal(0, 2), class = b, coef = MOT_MLU),
+ prior(normal(0, 2), class = b, coef = Visit),
+ prior(normal(0, 2), class = Intercept)
 )
 
-m2 <- brms::brm(
-  formula2,
-  data = noNa,
-  family = gaussian(), 
-  chains = 4,
-  cores = 2,
-  backend = "cmdstanr"
+priors2 <- c(
+  prior(normal(0, 2), class = b, coef = Age),
+prior(normal(0, 2), class = b, coef = DiagnosisASD),
+prior(normal(0, 2), class = b, coef = GenderM),
+prior(normal(0, 2), class = b, coef = MOT_MLU),
+ prior(normal(0, 2), class = b, coef = Visit),
+ prior(normal(0, 2), class = Intercept)
+
 )
 
-m3 <- brms::brm(
-  formula3,
-  data = noNa,
-  family = gaussian(),
-  chains = 4,
-  cores = 2,
-  backend = "cmdstanr"
+priors3 <- c(
+prior(normal(0, 2), class = b, coef = Age),
+prior(normal(0, 2), class = b, coef = DiagnosisASD),
+prior(normal(0, 2), class = b, coef = GenderM),
+prior(normal(0, 2), class = b, coef = MOT_MLU),
+prior(normal(0, 2), class = b, coef = Visit),
+ prior(normal(0, 2), class = Intercept)
 )
 
-m4 <- brms::brm(
-  formula4,
-  data = noNa,
-  family = gaussian(),
-  chains = 4,
-  cores = 2,
-  backend = "cmdstanr"
+priors4 <- c(
+prior(normal(0, 2), class = b, coef = Age),
+prior(normal(0, 2), class = b, coef = DiagnosisASD),
+prior(normal(0, 2), class = b, coef = GenderM),
+prior(normal(0, 2), class = b, coef = MOT_MLU),
+prior(normal(0, 2), class = b, coef = Visit),
+ prior(normal(0, 2), class = Intercept)
 )
-```
 
-
-```{r defining_priors}
-auto_priors1 <- sjstats::auto_prior(m1$formula, data, TRUE)
-auto_priors2 <- sjstats::auto_prior(m2$formula, data, TRUE)
-auto_priors3 <- sjstats::auto_prior(m3$formula, data, TRUE)
-auto_priors4 <- sjstats::auto_prior(m4$formula, data, TRUE)
-
+#I wound up setting the same priors for all since the random effects were the ones i kept changing; perhaps I should've done the fixed effects in tiers as well
 ```
 
 ## Prior Predictive Checking
 
 By setting *sample_prior* parameter is set to "only" in the **brm** function, draws are drawn solely from the priors, thus ignoring the likelihood. This allows among other things to generate draws from the prior predictive distribution.
+
 ```{r prior predictive checking}
 model1_prior <- brm(
   formula1,
-  noNa,
+  data,
   family = gaussian,
-  prior = prior1,
+  prior = priors1,
   sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
+  file = 'data/model1_prior',
   backend = "cmdstanr",
   chains = 2,
   stan_model_args = list(stanc_options = list("O1"))
@@ -395,11 +395,11 @@ prior_predictive1 <- pp_check(model1_prior, ndraws = 100)
 
 model2_prior <- brm(
   formula2, 
-  noNa,
+  data,
   family = gaussian,
-  prior = prior2,
+  prior = priors2,
   sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
-  #file = 'data/model2_prior',
+  file = 'data/model2_prior',
   backend = "cmdstanr",
   chains = 2,
   stan_model_args = list(stanc_options = list("O1"))
@@ -409,11 +409,11 @@ prior_predictive2 <- pp_check(model2_prior, ndraws = 100)
 
 model3_prior <- brm(
   formula3, 
-  noNa,
+  data,
   family = gaussian,
-  prior = prior3,
+  prior = priors3,
   sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
-  #file = 'data/model3_prior',
+  file = 'data/model3_prior',
   backend = "cmdstanr",
   chains = 2,
   stan_model_args = list(stanc_options = list("O1"))
@@ -423,11 +423,11 @@ prior_predictive3 <- pp_check(model3_prior, ndraws = 100)
 
 model4_prior <- brm(
   formula4, #is this stinkying it up?
-  noNa,
+  data,
   family = gaussian,
-  prior = prior4,
+  prior = priors4,
   sample_prior = "only", #draws are drawn solely from the priors, ignoring the likelihood!
-  #file = 'data/model4_prior',
+  file = 'data/model4_prior',
   backend = "cmdstanr",
   chains = 2,
   stan_model_args = list(stanc_options = list("O1"))
@@ -445,7 +445,7 @@ prior2model <- readRDS('data/model2_prior.rds')
 prior3model <- readRDS('data/model3_prior.rds')
 prior4model <- readRDS('data/model4_prior.rds')
 
-model1 <- brm(
+m1 <- brm(
   formula1,
   data,
   family = gaussian,
@@ -464,7 +464,7 @@ model1 <- brm(
   stan_model_args = list(stanc_options = list("O1"))
 )
 
-model2 <- brm(
+m2 <- brm(
   formula2,
   data,
   family = gaussian,
@@ -477,13 +477,13 @@ model2 <- brm(
   cores = 2,
   threads = threading(2),
   control = list(
-    adapt_delta = 0.9, 
+    adapt_delta = 0.90,
     max_treedepth = 20
   ),
   stan_model_args = list(stanc_options = list("O1"))
 )
 
-model3 <- brm(
+m3 <- brm(
   formula3,
   data,
   family = gaussian,
@@ -502,7 +502,7 @@ model3 <- brm(
   stan_model_args = list(stanc_options = list("O1"))
 )
 
-model4 <- brm(
+m4 <- brm(
   formula4,
   data,
   family = gaussian,
@@ -515,7 +515,7 @@ model4 <- brm(
   cores = 2,
   threads = threading(2),
   control = list(
-    adapt_delta = 0.9,
+    adapt_delta = 0.90,
     max_treedepth = 20
   ),
   stan_model_args = list(stanc_options = list("O1"))
@@ -524,51 +524,61 @@ model4 <- brm(
 
 ## Model quality checks
 ```{r check_models}
-plot(model1)
-plot(model2)
-plot(model3)
-plot(model4)
+plot(m1)
+plot(m2)
+plot(m3)
+plot(m4)
 
-pp_check(model1, ndraws = 100)
-pp_check(model2, ndraws = 100)
-pp_check(model3, ndraws = 100)
-pp_check(model4, ndraws = 100)
+pp_check(m1, ndraws = 100)
+pp_check(m2, ndraws = 100)
+pp_check(m3, ndraws = 100)
+pp_check(m4, ndraws = 100)
+
+pp_check(m1, type = "error_scatter_avg", ndraws = 100) + geom_smooth(method = "lm")
+pp_check(m1, type = "error_scatter_avg_vs_x", x = "Visit", ndraws = 100)
+
+pp_check(m2, type = "error_scatter_avg", ndraws = 100) + geom_smooth(method = "lm")
+pp_check(m2, type = "error_scatter_avg_vs_x", x = "Visit", ndraws = 100)
+
+pp_check(m3, type = "error_scatter_avg", ndraws = 100) + geom_smooth(method = "lm")
+pp_check(m3, type = "error_scatter_avg_vs_x", x = "Visit", ndraws = 100)
+
+pp_check(m4, type = "error_scatter_avg", ndraws = 100) + geom_smooth(method = "lm")
+pp_check(m4, type = "error_scatter_avg_vs_x", x = "Visit", ndraws = 100)
 ```
 
 ## Model Comparison
-```{r compare_models}
-m1 <- add_criterion(model1, criterion = "loo")
-m2 <- add_criterion(model2, criterion = "loo")
-m3 <- add_criterion(model3, criterion = "loo")
-m4 <- add_criterion(model4, criterion = "loo") 
+```{r compare_models, warning = F}
+m1 <- add_criterion(m1, criterion = "loo")
+m2 <- add_criterion(m2, criterion = "loo")
+m3 <- add_criterion(m3, criterion = "loo")
+m4 <- add_criterion(m4, criterion = "loo") 
 
-
-m1
-m2
-m3
+# m1
+# m2
+# m3
 m4
 
 
 loo_compare( m1, m2, m3, m4)
 loo_model_weights( m1, m2, m3, m4)
 
-bayes_R2(m1)
-bayes_R2(m2)
-bayes_R2(m3)
+# bayes_R2(m1)
+# bayes_R2(m2)
+# bayes_R2(m3)
 bayes_R2(m4)
-#m4 has highest R2 alongside m1, with a slightly smaller Est. error
 ```
-in loo_compare and loo_model_weights, Model 4 favored above all other models (1.00 vs 0.0 others)
-Model 4 also has the highest Bayesian R2 (0.81) and lowest Est. error (0.012) with Model 1 following closely behind despite being much more simple (0.81 and 0.013 respectively)
+in loo_compare and loo_model_weights, Model 4 favored above all other models (0.992)
+Model 4 also has the highest Bayesian R2 (0.81) and lowest Est. error (0.013)
 
-In the best model m4, CHI_MLU ~ 1 + Visit + Diagnosis + (1 + Visit + ADOS1 + Socialization1 + verbalIQ1 ||Child.ID), the intercept is estimated to be 1.12, falls between 0.89 and 1.35 95% of the time, meaning that the true population intercept for CHI_MLU lies between this value 95% of the time. Since the estimate falls within this range, it's reasonable to conclude it is statistically plausible.
+In the best model m4,
+CHI_MLU ~ 1 + Visit + Diagnosis + MOT_MLU + Gender+ Age+(1 + Visit + ADOS1 + Socialization1 + verbalIQ1 + Diagnosis||Child.ID)
+the intercept is estimated to be 1.13, falling between 0.91 and 1.35 95% of the time, meaning that the true population intercept for CHI_MLU lies between this value 95% of the time. Since the estimate falls within this range, it's reasonable to conclude it is statistically plausible.
 
-DiagnosisASD estimate is -0.12 with an interval of -0.45 to 0.21 (this includes zero, which might indicate that some ASD individuals have the same CHI_MLU as TD, meaning that they do not essentially differ in a statistically significant manner). Compared to TD, this means that those with DiagnosisASD have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero.
+DiagnosisASD estimate is -0.12 with an interval of -0.43 to 0.18 (this includes zero, which might indicate that some ASD individuals have the same CHI_MLU as TD, meaning that they do not differ in a statistically significant manner). Compared to TD, this means that those with DiagnosisASD generally have a -0.12 lower value of CHI_MLU, but this is muddied up by the credible interval containing zero.
 
-The standard deviation values grouped by Child.ID tell how the CHI_MLU values vary by Child.ID, for example the Intercept varies with 95% certainty between 0.12 and 0.20. Some of the sd values have fairly low ESS, meaning that they are not as reliable and may not have generated enough diverse samples. Either that, or its a convergence or model specification issue.
-
-The Family Specific Parameter sigma provides information about the sd of the response variable CHI_MLU, the estimate of which is 0.41 (how spread out the variable is around the mean). the 95% range for this standard deviance is 0.37 to 0.44.
-```{r testing kfold, cache=T, results = 'hide', message=FALSE }
+The standard deviation values grouped by Child.ID tell how the CHI_MLU values vary by Child.ID, for example the Intercept varies with 95% certainty between 0.0 and 0.33. Though, some of the sd values have fairly low ESS, meaning that they are not as reliable and may not have generated enough diverse samples. Either that, or its a convergence or model specification issue.
+```{r testing kfold, results = 'hide', message=FALSE }
 m1k <- kfold(
   m1,
   K = 10,
@@ -598,18 +608,18 @@ m4k <- kfold(
 )
 ```
 
-```{r testing kfold2}
-m1k <- readRDS("data/model1_prior.rds")
-m2k <- readRDS("data/model2_prior.rds")
-m3k <- readRDS("data/model3_prior.rds")
-m4k <- readRDS("data/model4_prior.rds")
+
+```{r testing kfold2, results = 'hide', message=FALSE}
+m1k <- readRDS("data/model1_kfold.rds")
+m2k <- readRDS("data/model2_kfold.rds")
+m3k <- readRDS("data/model3_kfold.rds")
+m4k <- readRDS("data/model4_kfold.rds")
 
 m1k
 m2k
 m3k
 m4k
 ```
-
 
 # Prediction
 
@@ -626,20 +636,18 @@ Relying on the model(s) you trained in part 2 of the exercise, create prediction
 - Discuss the differences in performance of your model in training and testing data. Is the model any good?
 - Let's assume you are a speech therapy clinic. You want to assess whether the kids in your test sample will have a typical (like a TD) development, or they will have a worse one, in which case they should get speech therapy support. What do your predictions tell you about that? Which kids would you provide therapy for? Is the model any good?
 
-```{r import_data}
+```{r import_data, results = 'hide', echo = F}
 demo <- read_csv("data/test-data/demo_test.csv")
 uld <- read_csv("data/test-data/LU_test.csv")
 token <- read_csv("data/test-data/token_test.csv")
 ```
 
 Remove missing data to ease merging with predictions
-```{r remove_missing}
-#are there any NA values when visit 1?
+```{r remove_missing, results = 'hide'}
 demo %>%
   filter(Visit == 1) %>%
   select(-VinelandReceptive, -VinelandExpressive, -VinelandWritten)%>%
   summarise(Any_NA = any(is.na(.)))
-#there arent if vineland is omitted, wtf is it even?
 
 demo <- demo %>% 
   group_by(Child.ID) %>%  
@@ -668,56 +676,50 @@ token <- token %>%
 
 test_data <- inner_join(demo,uld)
 test_data <- inner_join(test_data, token)
-
-test_data <- test_data %>%
-  select(Child.ID, Visit, Diagnosis, Socialization1, ADOS1, CHI_MLU, verbalIQ1)
-#was I wrong to use the 1st visit variables in the model?
 ```
 
 Here we should be using a model that'd have some more interesting predictors (to make sure we have something to predict)
 
 Alternatively we could retrain the model to include visit 1 for all the test kids (and thus have the random effects)
+```{r model_performance_test_and_training}
+model <- readRDS("data/model4_fit.rds")
 
-```{r train and assess performance}
-model <- readRDS("data/model4_fit.rds") #model 3 gives better results, consider switching to it?
+training_data <- data %>%
+  select(Child.ID, Visit, Diagnosis,MOT_MLU,Age, Socialization1, ADOS1, CHI_MLU, verbalIQ1)%>%
+  na.omit()
 
-posterior_samples <- posterior_predict(model, newdata = test_data, draws = 100, allow_new_levels = T)
-predicted_values <- colMeans(posterior_samples) #is colMeans correct here?
+test_data <- test_data %>%
+  select(Child.ID, Visit, Diagnosis,MOT_MLU,Age, Socialization1, ADOS1, CHI_MLU, verbalIQ1)
 
-observed_values <- test_data$CHI_MLU
+#sloppily done with ChatGPT, probably is a way smarter way
+datasets <- list(
+  test = list(
+    data = test_data,
+    name = "Test Data"
+  ),
+  training = list(
+    data = training_data,
+    name = "Training Data"
+  )
+)
 
-head(predicted_values)
-head(observed_values)
+for (dataset in datasets) {
+  posterior_samples <- posterior_predict(model, newdata = dataset$data, draws = 100, allow_new_levels = TRUE)
+  predicted_values <- colMeans(posterior_samples)
+  observed_values <- dataset$data$CHI_MLU
+  
+  model$residuals <- residuals(model)
+  
+  rmse_value <- sqrt(mean((observed_values - predicted_values)^2))
 
-#attempting to give the brmsfit residuals so performance_rmse can get them
-model$residuals <- residuals(model)
-
-rmse_value <- sqrt(mean((observed_values - predicted_values)^2))
-mae <- mean(abs(observed_values - predicted_values))
-print(paste("RMSE:", rmse_value, "&", "MAE:", mae))
-#[1] "RMSE: 1.11" error on average, mae 0.84 (average magnitude of errors between predicted and observed values)
+  cat("\n", dataset$name, ":\n")
+  cat("RMSE:", rmse_value)
+}
 ```
+## Discuss the differences in performance of your model in training and testing data. Is the modelany good?
+The higher RMSE on the test data indicates that the model is likely overfit on the training data and does not generalize particularly well to new data. This is somewhat to be expected, however my best model is likely not good enough given how big of an error 1.1 is.
 
-```{r train and assess performance, alternative model}
-model <- readRDS("data/model3_fit.rds") #model 3 gives better results, consider switching to it?
-
-posterior_samples <- posterior_predict(model, newdata = test_data, draws = 100, allow_new_levels = T)
-predicted_values <- colMeans(posterior_samples)
-
-observed_values <- test_data$CHI_MLU
-
-head(predicted_values)
-head(observed_values)
-
-
-rmse_value <- sqrt(mean((observed_values - predicted_values)^2))
-mae <- mean(abs(observed_values - predicted_values))
-print(paste("RMSE:", rmse_value, "&", "MAE:", mae))
-#[1] "RMSE: 0.89" error on average, mae 0.71 (average magnitude of errors between predicted and observed values)
-```
-Model 3 is better in performing than model 4, at least when it comes to RMSE and MAE. However, the performance appears lackluster regardless considering how large the RMSE is compared to the range of values we are working with in CHI_MLU.
-
-Should I switch to it considering the values given by loo and R2 were worse than for m4?
+The error is rather large considering how small the value range is:
 ```{r CHI_MLU value range}
 data %>%
   group_by(Diagnosis)%>%
@@ -726,13 +728,12 @@ data %>%
     max_MLU = max(CHI_MLU, na.rm = TRUE),
     min_MLU = min(CHI_MLU, na.rm = TRUE)
   )
-#the range of CHI_MLU values
 ```
 
 
 Show how ASD child fare in Child MLU compared to the average TD child at each visit
-```{r child_performance_td_average}
-model <- readRDS("data/model4_fit.rds") #model 3 gives better results, consider switching to it?
+```{r child_performance_td_average, warning  =F}
+model <- readRDS("data/model4_fit.rds")
 model_data <- model$data
 
 #the mean is being based on the TD mean, "the average TD child at each visit"
@@ -756,7 +757,17 @@ td_data <- subset(model_data, Diagnosis == "TD")
 ```
 
 
-```{r child_performance_td_average visualizations}
+```{r child_performance_td_average visualizations, warning = F}
+#ratio between high and low functioning between diagnoses & visits (ignoring Child.id)
+model_data %>%
+  group_by(Diagnosis, Visit) %>%
+  summarize(
+    high_ratio = sum(functioning == "high") / n(),
+    low_ratio = sum(functioning == "low") / n(),
+    mean_CHI_MLU_diff = mean(CHI_MLU) - mean(Mean_CHI_MLU)
+  ) %>%
+  arrange(Visit)
+
 ggplot() +
   geom_line(data = asd_data, aes(x = Visit, y = CHI_MLU, group = Child.ID, color = paste(Diagnosis, functioning, "func.")), size = 1, linetype = "solid") +
   geom_line(data = asd_mean_data, aes(x = Visit, y = Mean_CHI_MLU, color = "ASD Mean"), size = 2, linetype = "solid", alpha = 0.7) +
@@ -767,32 +778,22 @@ ggplot() +
   theme(legend.position = "top", legend.title = element_text(face = "bold"))+
   ggtitle("ASD development compared to TD mean\nfrom trained model data\nsplit into high/low functioning")
 
-
-#ratio between high and low functioning between diagnoses & visits (ignoring Child.id)
-model_data %>%
-  group_by(Diagnosis, Visit) %>%
-  summarize(
-    high_ratio = sum(functioning == "high") / n(),
-    low_ratio = sum(functioning == "low") / n(),
-    mean_CHI_MLU_diff = mean(CHI_MLU) - mean(Mean_CHI_MLU)
-  ) %>%
-  arrange(Visit)
-#TD children stay at the mean (because it is their mean), while ASD children veer away from it, getting behind visit-by-visit (on average), according to this trained model data
-
-
 ggplot() +
     geom_line(data = td_data, aes(x = Visit, y = CHI_MLU, group = Child.ID, color = paste(Diagnosis, functioning, "func.")), size = 1, linetype = "solid") +
   geom_line(data = td_mean_data, aes(x = Visit, y = Mean_CHI_MLU, color = "TD Mean"), size = 2) +
   labs(x = "Visits", y = "CHI_MLU", color = "") +
     geom_line(data = asd_mean_data, aes(x = Visit, y = Mean_CHI_MLU, color = "ASD Mean"), size = 2, linetype = "solid") +
-  scale_color_manual(values = c("TD high func." = "#8cc5d6", "TD low func." = "lightblue", "TD Mean" = "darkblue", "ASD Mean" = "red")) +
+  scale_color_manual(values = c("TD high func." = "skyblue", "TD low func." = "#5e84a9", "TD Mean" = "darkblue", "ASD Mean" = "red")) +
   theme_minimal() +
   theme(legend.position = "top", legend.title = element_text(face = "bold"))+ 
   ggtitle("TD development compared to TD mean\nfrom trained model data\nsplit into high/low functioning")
-
-#overall, TD individuals develop in a much less chaotic slope than the ASD individuals, who vary wildly (difference between high-functioning and low-functioning individuals can be very extreme)
-#did not include this information in the last plot for the sake of reducing visual noise
-
 ```
 
+TD children have low within-group variance and tend to develop in a predictable manner. ASD children have high within-group variance, with there being both "high-functioning" and "low-functioning" ASD individuals with very different CHI_MLU development trajectories. 
 
+Generally, the first visit CHI_MLU is predictive of future ASD and TD CHI_MLU development, as those who begin below average generally stay below average, and those who begin above average stay that way as well.
+
+## Let’s assume you are a speech therapy clinic. You want to assess whether the kids in your test sample will have a typical (like a TD) development, or they will have a worse one, in which case they should get speech therapy support. What do your predictions tell you about that? Which kids would you provide therapy for? Is the model any good?
+
+Since 1st visit CHI_MLU is rather predictive of the development of the child's MLU, any ASD child with a value below the TD mean on their first visit may possibly benefit from speech therapy. 
+Since there are also TD children who struggle with MLU, they may also benefit from speech therapy should their MLU be below average on the 1st and consequent visits. That said, they veer off from the mean expected value much less, meaning that ASD children with MLU issues are the ones that (generally) need the speech therapy the most.
